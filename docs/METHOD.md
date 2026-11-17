@@ -20,6 +20,16 @@ To test one point:
 A uniform offset is used, not a single raised point, so the curve stays monotonic and the driver has no reason to
 choose a different point.
 
+## Isolating one point
+
+A uniform offset has one weakness: a failure could come from another part of the curve, not from V. On the 5090 the
+edges at 900, 950 and 1000 mV all came at +510, which looked like that. The check: give the offset only to V and the
+points above it, keep every point below at a known safe offset (+300 here), and re-test the failing step. The curve
+stays monotonic as long as the offset under test is higher than the safe one.
+
+On the 5090 both re-tests failed again at +510 (1000 mV: PC went down; 950 mV: 5 driver resets, recovered), so the
+edges were real silicon limits. The tool does not do this yet; it was done by hand.
+
 ## The check: gpucheck
 
 `gpucheck/gpucheck.cu` runs deterministic FP32 FMA chains on every SM. Each launch sums a hash of each block's
@@ -32,7 +42,7 @@ Any difference is an error.
 - Heavy mode uses 3 blocks per SM, 2000/400 ms. Full load (more blocks) hit the 600 W power limit and the card
   dropped under the lock, so the point was not really tested.
 - Light mode uses 1 block per SM, 1500/600 ms. Under heavy load the 5090 held its voltage near 1.05 V (power,
-  current and reliability limits), but at light load it runs the top of the curve, 1.12 V and higher. Those
+  current and reliability limits), but at light load it runs the top of the curve, up to about 1.12 V. Those
   points can only be tested with a light load.
 
 ## Pass, fail, not reached
@@ -51,8 +61,11 @@ pass used 8 MHz, and called every step "not reached".
 
 ## Steps
 
+- Measure the real top voltage first. With the voltage slider at +100 % the 5090 held at most 1.115 to 1.120 V under
+  any load (1.125 V only near idle). Points above that are never used, so searching them gives only "not reached".
 - Start near the expected edge. On the 5090 the edge offset rose by about +30 MHz for each 50 mV lower, so after
   the first voltage, each next one can start about 60 to 90 MHz under its extrapolated edge (`--start`).
+- 60 s per step was enough on the 5090: every failure came within the step.
 - +30 MHz per step, then +15 MHz once the offset passes `fine_above`. Each failure costs a reboot, so the steps
   near the edge are small and each voltage is allowed one failure.
 - `--bracket` retries one fine step above the last pass after a failure. Off by default because it costs a
@@ -75,12 +88,43 @@ exposure is the same as a power cut, which NTFS journaling covers. Every check w
 2. Lock the clock to `cap.min_mhz,cap.max_mhz`.
 3. At the end: `nvidia-smi -rgc`, apply `final_profile` (or the source slot), then the cap again.
 
+## Result on the RTX 5090
+
+| Voltage | Highest clean | First fail | Offset clean / fail | Load |
+|---|---|---|---|---|
+| 900 mV | 2,497 | 2,512 | +495 / +510 | heavy |
+| 950 mV | 3,030 | 3,045 | +495 / +510 | heavy |
+| 1000 mV | 3,195 | 3,225 | +480 / +510 | heavy |
+| 1050 mV | 3,300 | 3,330 | +450 / +480 | heavy |
+| 1100 mV | 3,382 | none (voltage ceiling) | +435 / - | light |
+
+Clocks are lock targets in MHz. Most edges ended in a driver hang and a 0x133 bugcheck; one ended in driver resets
+that recovered. Full data: [blackwell-field-notes](https://github.com/Xipzer/blackwell-field-notes).
+
+## From limits to a curve
+
+Done by hand for now:
+
+1. Each tested point gets its clean offset minus 45 MHz (3 bins). Points in between are interpolated.
+2. Points under the lowest tested voltage keep a known safe offset.
+3. Points above the real top voltage do not matter; give them the top point's offset.
+4. Cap the clock (`nvidia-smi -lgc 210,MAX`) at or under the highest clean top clock.
+5. Validate: a benchmark, a stress test, and a run with hot water (45 C on the 5090).
+
+On the 5090 this gave +450 at 900 and 950 mV, +435 at 1000, +405 at 1050, +390 at 1100 to 1125, +300 below
+880 mV, a 3,330 MHz cap, and 15,678 in Steel Nomad (+2.6 % over a +180 uniform offset). The stress test and the hot
+run are pending.
+
 ## Transient boost spikes and the clock cap
 
 With a large offset, light-load moments (menus, alt-tab, loading screens) let the card jump to the top of the
 curve, around 3,200 MHz on the 5090, a point no game load ever runs and nothing had tested. That crashed the
 driver. The fix: `nvidia-smi -lgc 210,<cap>` keeps the full idle range but cuts off the top. It needs admin
 rights and does not survive a reboot, so `tools/install-tasks.ps1 -CapMax N` adds a logon task.
+
+After the per-voltage search the 5090's top ran 3,315 to 3,352 MHz with 0 errors, and the old spike crash did not
+come back (the card runs cooler on water now), so its cap went up to 3,330.
+
 A matching public report: https://rog-forum.asus.com/t5/gaming-notebooks/rtx-5090-laptop-gpu-hang-and-video-tdr-failure-regression/td-p/1157396/page/2
 
 ## Afterburner details
@@ -111,7 +155,9 @@ runs elevated). `bwoc/elevated.py` puts them behind one interface:
 1. Check the tool before believing a ceiling. Our first "ceiling" was a tolerance bug.
 2. Heavy load hides the top of the curve. The card will not run its highest voltages under a full load.
 3. A uniform offset gave similar edge offsets (+450 to +510) at every voltage tested, because the factory curve
-   already follows the silicon's slope.
-4. Every edge ended in a hang and a 0x133 bugcheck, not a clean driver reset. Plan for reboots.
-5. A clock that passes a compute check is not the whole story: the transient boost to the top of the curve is
+   already follows the silicon's slope. Raise only the point under test to prove an edge is that point's own.
+4. Most edges ended in a hang and a 0x133 bugcheck, not a clean driver reset. Plan for reboots.
+5. Measure the real top voltage before searching above it, and read the live voltage from Afterburner.
+6. Files written just before a crash can be lost, as with a power cut. Commit and sync before each step.
+7. A clock that passes a compute check is not the whole story: the transient boost to the top of the curve is
    what crashed in normal use.
