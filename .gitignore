@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+bwoc.ini
+state/
+gpucheck/gpucheck
+gpucheck/gpucheck.exe
+gpucheck/*.exp
+gpucheck/*.lib
+tools/cmd.txt
+tools/ack.txt
+tools/ab-stage.cfg
