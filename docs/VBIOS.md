@@ -41,13 +41,36 @@ Verify the editor and loader downloads against the release SHA256SUMS. The loade
 | `power_max_w` 600 -> 700 | `power.max_limit` 700 W; Afterburner's power slider goes to 121 %. Time Spy Extreme graphics 28,223, best on this curve. But Time Spy Extreme peaked at about 592 W: the curve and the hang, not the power limit, set the result |
 | `nvvdd_rel_equation_max_mv` / `msvdd_rel_equation_max_mv` 1110 -> 1150 (and the linked `*_rel_max_mv`) | nothing measurable. The reliability (REL) voltage is computed per chip. Afterburner's extended report (helper `abreport`) shows NVVDD Vrel 1,120 mV and MSVDD Vrel 1,070 mV (with a -50 mV MSVDD offset) on this card; the highest load voltage we saw, 1.115 to 1.120 V, matches the NVVDD figure. An earlier version of this page said the core REL was about 1,070 mV, which mixed up the rails |
 | `msvdd_rel_equation_min_mv` 900 -> 1100 (the MSVDD REL floor) | Time Spy GT2 hang rate 4 in 9 runs (one of them a full Windows freeze) against 5 in 8 without it. Not a fix |
+| `runtime_voltage_offsets` 0 -> 1 | loads fine, but mVolt+ v0.50.13 NVVDD offsets (`--nvvdd-offsets 0,25,25`) were still ignored on driver 621.24: success reported, `rail_offsets_ignored_by_driver: true`, `nvvdd_max` stayed 1,120 mV |
+| `nvvdd_rel_equation_min_mv` 900 -> 1150 (the NVVDD REL floor; only field changed, 101 bytes) | **works.** After the restart mVolt+ `--status` reads `nvvdd_max` 1,170 mV (REL 1,150 plus the ALT +20 step), was 1,120. Under load the core tops out at about 1.135 V read (about 1.145 V set, the REL limit; ALT +20 unused). Only light loads get there: 4K Time Spy Extreme GT1 (about 540 W) stays at or under 1.02 V. With the curve top ramped from 3,247 MHz at 1,070 mV to +255 at 1,170 mV, a light 720p GT1 load runs 3,360 to 3,382 MHz instead of 3,172 to 3,195 (4 of 4 clean; +315 hung at 3,457 MHz) and GT2 went from 176.6 to 179.0 fps (1 run) |
 
 Background, from the editor's documentation and changelog:
 
-- The REL floor (`*_rel_equation_min_mv`) is the field that raises the REL voltage; the ceiling does not.
+- The REL floor (`*_rel_equation_min_mv`) is the field that raises the REL voltage; the ceiling does not. The chip
+  computes its own Vrel (1,120 mV on ours) and the REL equation floor and ceiling clamp it, so a floor above the
+  computed value sets the limit (our reading, confirmed by the 1,170 mV result above).
 - On driver 621.01 and newer, RTX 50 cards ignore NVVDD and MSVDD runtime voltage offsets: the driver accepts them
   and reports success, but nothing changes. Afterburner's voltage slider is a no-op there. The editor's
-  `runtime_voltage_offsets=1` adds hooks so a runtime tool can apply offsets again.
+  `runtime_voltage_offsets=1` adds hooks so a runtime tool can apply offsets again; on our card with driver 621.24
+  and mVolt+ v0.50.13 they were still ignored, so use the static REL floor.
+
+## Voltage lever: raising the core voltage limit
+
+What worked on the 5090 FE (18 Nov 2026):
+
+1. Start from the image you run now (for us the 700 W image with `runtime_voltage_offsets=1`).
+2. `tools/vbios.py edit current.rom current-rel1150.rom --set nvvdd_rel_equation_min_mv=1150` and check that the
+   diff lists only that field.
+3. Load it (`vixload`), restart, `vixverify`, and read the limit back (mVolt+ `--status`, `nvvdd_max_mv`; or watch
+   the highest voltage under a light load). Do not trust a tool's "success" without reading it back.
+4. Ramp the top of the curve (here 3,247 MHz at 1,070 mV to 3,247 + D at 1,170 mV) and search D with a light load
+   that actually sits at the top of the curve (Time Spy Extreme GT1 at 720p, about 250 W). Heavy 4K loads never get
+   there. A 720p load is CPU bound, so compare clocks, not fps.
+5. Rollback: load the previous image again and restart.
+
+Our ladder: D = +60, +105, +150, +195, +255 clean (3,255 to 3,382 MHz read), +315 hung at 3,457 MHz / 1.145 V.
+Saved: Profile 1 top +255, Profile 2 top +195. Details:
+[blackwell-field-notes, Voltage lever](https://github.com/Xipzer/blackwell-field-notes#voltage-lever).
 - MSVDD feeds the fabric (XBAR and SYS clocks); XBAR runs at about 0.90 x the core clock. NVIDIA lowered the MSVDD
   REL by 50 mV from driver 572.60, which is why the MSVDD floor was worth a test.
 

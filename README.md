@@ -40,6 +40,11 @@ Founders Edition (water-cooled).** Results are in
   old hang-prone curve, +3.7 %, now stable), CPU 13,615. Rank 92 of about 3,270 results for i9-14900KS + RTX 5090,
   on a daily profile with no hardware mods. See
   [blackwell-field-notes Results](https://github.com/Xipzer/blackwell-field-notes#results).
+- **Voltage lever (18 Nov, 20:00 UTC):** mVolt+ runtime voltage offsets are ignored on driver 621.24, but raising
+  the NVVDD REL floor in the override image (`nvvdd_rel_equation_min_mv` 900 -> 1150) lifts the core voltage limit
+  from 1,120 to 1,170 mV. With the curve top ramped to +255 at 1,170 mV, light loads run 3,360 to 3,382 MHz instead
+  of about 3,180; heavy loads never use it (at or under 1.02 V). GT2 179.0 fps in one run (was 176.6). See
+  [docs/VBIOS.md](docs/VBIOS.md#voltage-lever-raising-the-core-voltage-limit).
 
 Not built yet: writing a per-point curve from the results and the isolated re-test are still done by hand, and the
 3D (FurMark) search is not in this repo yet. See [docs/METHOD.md](docs/METHOD.md).
@@ -61,7 +66,7 @@ this tool handles or depends on:
 | A driver reset wipes curve, memory offset, cap and XBAR offset | `--profile` and `--cap` re-applied after every failure; re-send `abwp XBARCLK_off N` yourself |
 | Afterburner polls at 1 s by default; global settings in `Profiles\MSIAfterburner.cfg` | you: `HwPollPeriod=100` there while logging |
 | Afterburner shared memory goes stale after an Afterburner restart | `mahmlog.ps1` checks signature and timestamp, reopens |
-| Voltage slider and `NVVDD_off_Vrel` ignored on driver 621.x | none; see docs/VBIOS.md (`runtime_voltage_offsets`) |
+| Voltage slider and `NVVDD_off_Vrel` ignored on driver 621.x | you: mVolt+ offsets were ignored too (621.24); raise `nvvdd_rel_equation_min_mv` in the image instead (docs/VBIOS.md, voltage lever) |
 | HWiNFO free cannot log from the command line; old Intel iGPU drivers crash it | you: shared memory (`SensorsSM=1`); `oneAPI=0` or a newer Intel driver |
 | Two harnesses at once give nonsense fps | preflight refuses to start when the GPU is busy |
 | 8 runs prove little | `--rate`; use 1 run to screen, 3 to keep, 10 to 12 for the final pass |
