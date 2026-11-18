@@ -137,7 +137,8 @@ FurMark 3D limits on the 5090 (real clocks, everyday water): 850 mV 1,800; 875 m
 1. Each point gets the highest real clock the 3D search proved at that voltage. Points in between are
    interpolated; a point never gets less clock than a lower voltage.
 2. Flatten the top: above the voltage where the clock stops rising, keep it flat, so the curve caps itself.
-3. Validate with the real workload, fullscreen, cold and warm: Time Spy Extreme (or its GT2 alone, with the trial
+3. Validate with the real workload, really fullscreen on one display (check the window, see
+   [VALIDATION.md](VALIDATION.md)), cold and warm: Time Spy Extreme (or its GT2 alone, with the trial
    harness, see [VALIDATION.md](VALIDATION.md)), the Steel Nomad Stress Test, and a hot run.
 4. If GT2 hangs, lower the whole curve uniformly (see "Margin" below) before reshaping single points or adding caps.
    On the 5090 the curve needed 30 to 60 MHz less at every voltage.
@@ -155,37 +156,44 @@ reboot, and a driver reset clears it, so `tools/install-tasks.ps1 -CapMax N` add
 
 What a cap can and cannot do: it only limits clocks above it. On the 5090, caps at 3,202 and 3,232 MHz did nothing
 for the GT2 hang, because heavy scenes never reach those clocks. Caps at 3,060 and 3,090 MHz passed 13 of 13 cold
-GT2 runs at 600 W, but those runs were windowed (a different load, see [VALIDATION.md](VALIDATION.md)). Fullscreen at
-700 W both hung: 3,090 on run 4 of 12, 3,060 on run 9 of 12 (real 2,932 MHz at 960 mV, about 530 W, 47 C).
+GT2 runs at 600 W, but those runs were windowed (a different load, see [VALIDATION.md](VALIDATION.md)). With
+`is_windowed: false` at 700 W (which, as found later, also ran in a fallback window) both hung: 3,090 on run 4 of 12, 3,060 on run 9 of 12 (real 2,932 MHz at 960 mV, about 530 W, 47 C).
 
 A cap does not add margin. It only moves the operating point along the same overclocked curve: at 3,060 MHz the
 card runs a lower voltage point that has the same too-small margin as every other point. To gain margin, lower the
 curve itself (next section).
 
-The power limit is a ceiling in the same way: it only matters when the card reaches it. Fullscreen GT2 on this card
-drew about 460 to 560 W, under a 700 W limit. Our earlier reading that 700 W itself made the 3,060 and 3,090 caps
-hang compared windowed runs at 600 W with fullscreen runs at 700 W, so it is withdrawn. One open point: a short
-fullscreen series at a 600 W setting (2 runs, cap 3,060) ran about 110 MHz lower than the same cap at 700 W while
+The power limit is a ceiling in the same way: it only matters when the card reaches it. GT2 on this card drew
+about 460 to 560 W in those runs, under a 700 W limit. Our earlier reading that 700 W itself made the 3,060 and
+3,090 caps hang compared runs in two different window modes, so it is withdrawn. One open point: a short series at
+a 600 W setting (2 runs, cap 3,060) ran about 110 MHz lower than the same cap at 700 W while
 drawing only about 460 W, so something other than the power limit held it back there. Not yet explained.
 
 ## Margin: shift the whole curve
 
 The per-voltage search (FurMark in 3D) finds the edge at each voltage under a steady load. Time Spy GT2's heaviest
-scenes need more margin than that at every voltage. On the 5090 (fullscreen, 700 W, memory +3000, no cap, GT2
-direct launches):
+scenes need more margin than that at every voltage. On the 5090 (`is_windowed: false`, which ran in the 3840x2160
+fallback window; 700 W, memory +3000, no cap, GT2 direct launches):
 
 | Curve | Result |
 |---|---|
 | Profile 1 as found | 3 hangs in 8 runs |
 | every point 30 MHz lower | hung on run 6 of 12 |
 | every point 60 MHz lower | clean 12 of 12 (cost: about 1 fps, 153.6 to 155.1 vs 154.5 to 156.3) |
-| every point 45 MHz lower | pending |
-| 60 MHz lower, 60 runs in total | pending |
+| every point 45 MHz lower | clean 12 of 12 |
+| every point 45 MHz lower, XBAR +300 | clean 12 of 12 |
+| per voltage band vs Profile 1: up to 980 mV +15, 981 to 1,005 -30, 1,006 to 1,030 -75, 1,031 to 1,060 -45, XBAR +300 | clean 11 of 11 |
+| any of these in borderless fullscreen | being re-tested |
 
 So the FurMark-derived curve is about 30 to 60 MHz too aggressive at every voltage for GT2. This also explains why
 the "hang zone" seemed to move whenever the curve or the cap moved: there was no zone, every point lacked the same
 margin. Rule: after the per-voltage search, lower the whole curve uniformly in 15 to 30 MHz steps until a long
-fullscreen GT2 series is clean, then keep that shift.
+GT2 series in real fullscreen is clean, then keep that shift. Per-band refinement after that (move one voltage band
+at a time, attribute each hang to the band of its voltage) found the 1,006 to 1,030 mV band needed the most margin
+here (75 MHz) and the low band none.
+
+Run counts: 1 run per screening step, 3 to keep a step, 10 to 12 only for the final pass. 16 clean runs bound the
+hang rate under about 17 %, 60 under 5 % (95 %, one-sided).
 
 `-lgc F,F` (min = max) does not hold F on Blackwell under a heavy 3D load: the card ran about 100 MHz under it.
 
@@ -239,18 +247,23 @@ runs elevated). `bwoc/elevated.py` puts them behind one interface:
    on its fifth run; that only became clear with repeated runs and the 100 ms log.
 10. Every step changed only one thing, and every result is in the journal with its conditions (water temperature,
     driver state, VBIOS). Cold and warm runs are different tests.
-11. Check how the benchmark actually runs. A copied 3DMark workload ran windowed across several monitors, a different
-    load from fullscreen; every harness hang rate before that was found was measured in the wrong mode.
+11. Check how the benchmark actually runs. A copied 3DMark workload ran windowed across several monitors, and
+    `is_windowed: false` alone still fell back to a window after the first run of a boot. Read the window during the
+    run; every harness hang rate before 18 Nov 16:23 UTC was measured in a window.
 12. Caps and power limits do not add margin. They move the operating point along the same curve. Margin comes
     from lowering the curve.
+13. One display adapter while measuring: a monitor on the Intel iGPU cost about 5.5 % in GT2, and HWiNFO running
+    hid most of it.
 
 ## What we got wrong
 
 - **"The hang lives in a clock zone around 3,000 to 3,150 MHz."** Caps under the zone looked clean (13 of 13 at
-  600 W), but those runs were windowed. Fullscreen, caps of 3,090 and 3,060 MHz both hung, the latter at a real
+  600 W), but those runs were windowed. With `is_windowed: false`, caps of 3,090 and 3,060 MHz both hung, the latter at a real
   2,932 MHz. The zone moved with every curve or cap change because there was no zone: the whole curve lacked 30 to
   60 MHz of margin.
-- **"700 W makes it worse."** That compared windowed 600 W runs with fullscreen 700 W runs. Withdrawn.
+- **"700 W makes it worse."** That compared runs in two different window modes. Withdrawn.
+- **"From 09:00 on 18 Nov the harness runs fullscreen."** It asked for fullscreen; 3DMark ran a 3840x2160 window.
+  Fixed with `is_borderless: true` and a native-size swapchain (VALIDATION.md).
 - **"Memory +3000 might be the cause."** Memory at +0 also hung (windowed, run 2, a hard freeze seen in the
   telemetry log; the PC froze before the harness could record it), so it is not the sole cause.
 - **"Our logs are 100 ms."** Afterburner polled at 1 s until 18 Nov, so the logs repeated each value ten times.

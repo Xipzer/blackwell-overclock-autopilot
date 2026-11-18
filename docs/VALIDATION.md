@@ -15,16 +15,17 @@ Getting the workload files, once:
 1. Start a normal run of the test (for example a Time Spy Extreme custom run with only Graphics Test 2).
 2. While it runs, read the test process's command line, in PowerShell:
    `Get-CimInstance Win32_Process -Filter "Name='3DMarkTimeSpy.exe'" | Select-Object -Expand CommandLine`
-3. Copy the file given after `--in` to `workload_dir` as `gt2.json` (and the same for `gt1.json`). Keep the keys
-   `dxgi_adapter_luid` and `is_windowed`; the tool rewrites both (the LUID to the current one, `is_windowed` to
-   `false`).
+3. Copy the file given after `--in` to `workload_dir` as `gt2.json` (and the same for `gt1.json`). The tool
+   rewrites four keys before every launch: `dxgi_adapter_luid` (the current one), `is_windowed` (`false`),
+   `is_borderless` (`[3dmark] borderless`, default `true`) and `swapchain_resolution` (`[3dmark] swapchain`, default
+   the primary display's native size). See "Display mode" below for why all four matter.
 4. Set `[3dmark] exe` to the test binary (`...\3DMark\dlc\time-spy-test\bin\x64\3DMarkTimeSpy.exe` for Time Spy).
 
 What the tool handles:
 
 | Problem | What happens | Handling |
 |---|---|---|
-| The copied workload runs windowed | `"is_windowed": true` gave a window spread over several monitors and a different load: GT2 at about 149 fps instead of 154 to 170 fps fullscreen | `is_windowed` is forced to `false` before each launch |
+| The run is not fullscreen | a copied workload can say `"is_windowed": true`; with `"is_windowed": false` alone, 3DMark went fullscreen only on the first run after a boot and then fell back to a 3840x2160 window across monitors (about 141 fps against 172 in GT2) | `is_windowed: false`, `is_borderless: true` and a native-size `swapchain_resolution` are written before each launch; the window is read once per run (`tools/winrect.ps1`) and each result records `mode` (`borderless`, `windowed`, ...) with a warning when it was not fullscreen |
 | The DXGI adapter LUID changes on every boot | 3DMark refuses the launch: "No DXGI adapter with given luid found". It looks like a failed run | `tools/luid.ps1` lists the adapters; the LUID is written into the workload before each launch |
 | A hang takes minutes to notice | waiting for the process to end cost up to 150 s per hang | every 2 s one PowerShell call checks the process and the System log (event 4101, any nvlddmkm event) |
 | A launch that never ran | locked drive, stale LUID, sleeping display: no result and no reset | not counted; relaunched up to `trial.relaunch` times |
@@ -40,8 +41,34 @@ python -m bwoc tse --tests gt1,gt2 --runs 4                   # both tests, back
 A run passes when the process exits by itself, 3DMark wrote a result, and no driver reset was logged.
 
 Back-to-back direct launches are harsher than full 3DMark runs. On the 5090 the same setup hung 5 times in 8 direct
-GT2 runs (windowed; 3 in 8 fullscreen) while full app runs (with demo, loading and the CPU test between graphics
-tests) passed. Use the harness to compare settings with each other, not to predict how often a full run fails.
+GT2 runs (windowed; 3 in 8 with `is_windowed: false`, which also ended up in a window) while full app runs (with
+demo, loading and the CPU test between graphics tests) passed. Use the harness to compare settings with each other,
+not to predict how often a full run fails.
+
+## Display mode: check it, do not assume it
+
+A direct launch does not reliably run the way the workload asks. What we measured on the 5090, four monitors, GT2,
+window read about 30 s into each run with `GetWindowRect` and `GetWindowLong(GWL_STYLE)`:
+
+| Workload settings | Window | GT2 fps |
+|---|---|---|
+| `is_windowed: true` (as copied) | ordinary window across monitors | about 149 |
+| `is_windowed: false` (exclusive fullscreen) | first run after a boot fullscreen; every later run an ordinary 3840x2160 window at 0,0 to 3856,2199, style `0x14CF0000` | 172.5, then 141.0 |
+| `is_windowed: true`, `is_borderless: true`, 1920x1080 swapchain | ordinary window, `0x14CF0000` | 140.4 |
+| **`is_windowed: false`, `is_borderless: true`, 1920x1080 swapchain** | **0,0 to 1920,1080, style `0x94000000`, every run** | **171.8, 171.8, 172.0** |
+
+Style `0x14CF0000` has `WS_CAPTION` (`0x00C00000`): a normal window. `0x94000000` is `WS_POPUP | WS_VISIBLE |
+WS_CLIPSIBLINGS`: borderless and display-sized. The harness calls a run `windowed` when the caption bit is set and
+`borderless` when there is no caption and the size equals the swapchain.
+
+Why it matters: the fallback window is a lighter load. PresentMon showed the GPU idle about 13 % of each frame
+(GPU busy 6.07 ms of 7.09 ms) and HWiNFO's "Performance Limit - Utilization" flag stayed on. Hang rates measured in
+it understate the load and overstate the margin, and its fps only compare within one session.
+
+A second display adapter matters too: with one monitor on the Intel iGPU, the fallback window ran about 5.5 % slower
+(152.7 to 153.1 fps against 161.3 to 162.0 with the iGPU disabled), and HWiNFO running hid most of that. Put every
+monitor on the NVIDIA card and disable the iGPU in Windows and the BIOS before measuring. Details, sources and a
+clean measurement checklist: [blackwell-field-notes QUIRKS.md](https://github.com/Xipzer/blackwell-field-notes/blob/main/QUIRKS.md).
 
 ## Displays must stay awake
 
@@ -67,15 +94,26 @@ Three things to get right, all found the hard way on 18 Nov:
   after the change). On the 5090 every "100 ms" log before 18 Nov was really 1 s data.
 - **Afterburner restarts.** If Afterburner restarts while a logger holds `MAHMSharedMemory` open, the new instance
   does not publish into the old mapping: the logger keeps reading frozen values (the signature at offset 0 becomes
-  `0xDEAD`, or the timestamp at offset 20 stops moving). On the 5090 this left two whole series of fullscreen runs
+  `0xDEAD`, or the timestamp at offset 20 stops moving). On the 5090 this left two whole series of `is_windowed: false` runs
   with a flat log, including the hang with a 3,090 MHz cap. The logger now checks the signature and the timestamp
   and reopens the mapping when either goes stale (`-StaleSeconds`, default 5).
 - **Extra rails.** Afterburner 4.6.7 Beta 5 with the "out of warranty" voltage control option (`OEM=3` in
   `Profiles\MSIAfterburner.cfg`) adds the crossbar clock (XBAR), the system clock and the aux voltage (MSVDD) to the
   shared memory. The logger writes them in `xbar`, `sys` and `auxv`; the columns stay empty without that option.
+  The same mode allows low-level writes (helper command `abwp`, for example `abwp XBARCLK_off 300`) and an extended
+  report (helper command `abreport NAME`: SPEEDO, IDDQ, Vrel and Vop per rail, clock domains, V/F points). Driver
+  621.x ignores `NVVDD_off_Vrel` and `MSVDD_off_Vrel` like it ignores the voltage slider.
 
-HWiNFO can log effective clocks too, but only HWiNFO Pro can start and stop logging from the command line, so it
-does not fit an unattended harness on the free version.
+**XBAR offset on the 5090** (Profile 1 curve, cap 3,090 MHz, fallback window): +0 = 2,415 MHz under load, 153.7 to
+154.0 fps; +100 = 2,505, 155.8; +200 = 2,602, 156.9; +300 = 2,707 MHz (0.91 x core, about the 0.90 ratio ceiling),
+157.8 fps (+2.6 %). A driver reset or restart clears it; re-apply it with the curve.
+
+**HWiNFO.** Only HWiNFO Pro can start and stop a sensor log from the command line. On the free version, set
+`SensorsSM=1` in `HWiNFO64.INI` and read the shared memory (`Global\HWiNFO_SENS_SM2`) yourself. Sensor indices move
+between HWiNFO restarts, so look values up by name on every poll. Other keys we used: `oneAPI=0` (avoids a crash with
+old Intel iGPU drivers), `PresentMon`, `NvmlSupport` (no fps effect either way). Useful values: GPU effective clock
+(matched the requested clock at the median under GT2 load), crossbar and system domain clocks, MSVDD output voltage,
+and the five Performance Limit flags (Power, Thermal, Reliability Voltage, Max Operating Voltage, Utilization).
 
 For the clock limit reasons (power cap, thermal, reliability voltage), log nvidia-smi alongside it:
 
@@ -94,7 +132,7 @@ Every Time Spy hang on the 5090 had the same shape in the 100 ms log:
 4. A driver reset (event 4101, nvlddmkm event 14 "PF FLR") 2 to 15 s later, or a full Windows freeze.
 
 With true 100 ms polling (after the `HwPollPeriod` fix above) one more step shows up between 1 and 2: the readings
-freeze for a few samples. One fullscreen hang (cap 3,060 MHz, 700 W, 18 Nov):
+freeze for a few samples. One hang (cap 3,060 MHz, 700 W, `is_windowed: false`, 18 Nov):
 
 | Time (UTC) | Clock | Voltage | Power | Usage | Core | XBAR | SYS | Aux |
 |---|---|---|---|---|---|---|---|---|
@@ -118,10 +156,11 @@ On the 5090's log of 17 and 18 Nov it found every logged Time Spy hang but one: 
 load-ramp test (`gpucheck/ramp.cu`), which holds the GPU at 100 % usage and 170 W on purpose. Check flagged times
 against what was running.
 
-## Re-tests in fullscreen (18 Nov)
+## Re-tests with `is_windowed: false` (18 Nov)
 
-Every harness hang rate before 18 Nov 09:00 UTC was measured windowed. Re-run fullscreen (Profile 1 curve, 700 W
-limit, memory +3000, GT2 direct launches):
+Every harness hang rate before 18 Nov 09:00 UTC was measured windowed. These re-runs asked for fullscreen but, as
+found later that day, ran in the 3840x2160 fallback window (see "Display mode" above). They compare with each other,
+not with real fullscreen (Profile 1 curve, 700 W limit, memory +3000, GT2 direct launches):
 
 | Setup | Result | GT2 fps (passing runs) |
 |---|---|---|
@@ -130,13 +169,17 @@ limit, memory +3000, GT2 direct launches):
 | Cap 3,060 MHz | hung on run 9 of 12 (real 2,932 MHz at 960 mV, about 530 W, 47 C) | 152.4 to 153.6 |
 | Whole curve 30 MHz lower at every voltage, no cap | hung on run 6 of 12 | 154.8 to 155.4 |
 | Whole curve 60 MHz lower at every voltage, no cap | **clean 12 of 12** | 153.6 to 155.1 |
+| Whole curve 45 MHz lower at every voltage, no cap | **clean 12 of 12** | 154.1 to 155.3 |
+| Whole curve 45 MHz lower, XBAR +300 | **clean 12 of 12** | 157.8 to 167.2 |
+| Per voltage band vs Profile 1 (up to 980 mV +15, 981 to 1,005 -30, 1,006 to 1,030 -75, 1,031 to 1,060 -45), XBAR +300 | clean 11 of 11 (4 hangs on the way, all at 1,010 to 1,035 mV and 3,052 to 3,105 MHz) | 158.7 to 160.0 |
 
-Pending: the curve 45 MHz lower (12 runs), and the 60 MHz lower curve extended to 60 runs in total (0 hangs in 60
-would put the hang rate under 5 % at 95 % confidence).
+Being repeated in borderless fullscreen with the fixed harness. Run counts: 1 run to screen a step, 3 to keep it,
+10 to 12 only for the final pass. 16 clean runs bound the hang rate under about 17 % and 60 clean runs under 5 %
+(95 %, one-sided: 1 - 0.05^(1/n)); 8 runs cannot tell 5 hangs in 8 from 3.
 
-Two windows with the same settings scored 167 to 170 fps instead of about 155; three later sessions with an
-Afterburner restart between them all scored 153.6 to 156.0, uncapped or with the 3,090 cap. Why is still being
-investigated.
+The fps "states" (about 155 in most sessions, 167 to 173 in a few, 137 to 141 later) were the display path, not
+the GPU: the fallback window, the iGPU monitor and HWiNFO's polling of the iGPU. Core clocks were the same in all
+of them.
 
 ## What did not reproduce the hang
 
@@ -179,3 +222,6 @@ worked:
 - **`pkill -f PATTERN` can kill your own shell** when the pattern is also in that shell's command line. Match the
   exact process name instead.
 - **Check that the GPU is idle** before starting any test; an unattended test once collided with a benchmark.
+- **One harness at a time.** Two scripts launching 3DMark together gave about 90 fps runs that mean nothing.
+- **Check the window and the adapter** (see "Display mode"): one monitor on the iGPU or a fallback window changes
+  the load more than most curve changes do.

@@ -24,7 +24,8 @@ DEFAULTS = {
     "cap": {"min_mhz": "210", "max_mhz": ""},
     "sweep": {"seconds": "60", "start_offset": "270", "step": "30", "fine_step": "15", "fine_above": "420",
               "max_offset": "1000", "lock_tolerance": "30", "voltage_tolerance": "20", "boot_delay": "150"},
-    "3dmark": {"exe": "", "workdir": "", "workload_dir": "", "adapter_match": "NVIDIA", "timeout": "150", "poll": "2"},
+    "3dmark": {"exe": "", "workdir": "", "workload_dir": "", "adapter_match": "NVIDIA", "timeout": "150", "poll": "2",
+               "borderless": "true", "swapchain": "", "window_check": "30"},
     "trial": {"runs": "8", "tests": "gt2", "relaunch": "3", "cooldown": "10"},
 }
 

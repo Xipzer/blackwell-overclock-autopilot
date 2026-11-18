@@ -20,17 +20,41 @@ Founders Edition (water-cooled).** Results are in
   because a hot core drops temperature bins and never runs the clock it was given.
 - The max curve passes warm runs (Time Spy Extreme graphics up to 28,223 at 700 W, Steel Nomad Stress Test 99.2 %),
   but hangs at random in one heavy scene of Time Spy Extreme Graphics Test 2, more often with a cold core. Clock
-  caps at 3,060 or 3,090 MHz passed 13 of 13 cold runs at 600 W; lowering single curve regions, less memory
+  caps at 3,060 or 3,090 MHz passed 13 of 13 cold runs at 600 W in a window but hung at 700 W; lowering single curve regions, less memory
   overclock, the stock VBIOS and a raised MSVDD voltage floor did not stop it. See
   [docs/VALIDATION.md](docs/VALIDATION.md).
 - 700 W without flashing works through a VBIOS override ([docs/VBIOS.md](docs/VBIOS.md)), but Time Spy peaks
   at about 592 W, so power was not the limit.
+- Lowering the whole curve 45 or 60 MHz at every voltage, or per voltage band, stopped the GT2 hang (12 of 12 and
+  11 of 11). But those runs, like every harness run before 18 Nov 16:23 UTC, were not really fullscreen: 3DMark
+  had fallen back to a 3840x2160 window, a lighter load. The `tse` harness now forces borderless fullscreen
+  (`is_borderless: true`, native-size swapchain), which held on every run, and records the real window mode per run.
+  See [Known quirks](#known-quirks).
 
 Not built yet: writing a per-point curve from the results and the isolated re-test are still done by hand, and the
 3D (FurMark) search is not in this repo yet. See [docs/METHOD.md](docs/METHOD.md).
 
 > **Warning.** The search pushes the GPU until it fails, on purpose. Expect driver hangs and blue screens
 > (DPC_WATCHDOG_VIOLATION, 0x133), one per voltage. Save and close your work first. Use at your own risk.
+
+## Known quirks
+
+The full list with remedies and public sources is in
+[blackwell-field-notes QUIRKS.md](https://github.com/Xipzer/blackwell-field-notes/blob/main/QUIRKS.md). The ones
+this tool handles or depends on:
+
+| Quirk | What the tool does / what you do |
+|---|---|
+| A direct 3DMark launch runs in a 3840x2160 window, not fullscreen (exclusive fullscreen held only for the first run after boot) | `tse` writes `is_windowed: false`, `is_borderless: true`, `swapchain_resolution` = display size; reads the window each run (`0x94000000` = borderless fullscreen, `0x14CF0000` = window) and warns |
+| A monitor on the Intel iGPU costs about 5.5 % (cross-adapter copy); HWiNFO hides it | you: all monitors on the NVIDIA card, iGPU off in Windows and BIOS |
+| DXGI LUID changes every boot | looked up and written per launch |
+| A driver reset wipes curve, memory offset, cap and XBAR offset | `--profile` and `--cap` re-applied after every failure; re-send `abwp XBARCLK_off N` yourself |
+| Afterburner polls at 1 s by default; global settings in `Profiles\MSIAfterburner.cfg` | you: `HwPollPeriod=100` there while logging |
+| Afterburner shared memory goes stale after an Afterburner restart | `mahmlog.ps1` checks signature and timestamp, reopens |
+| Voltage slider and `NVVDD_off_Vrel` ignored on driver 621.x | none; see docs/VBIOS.md (`runtime_voltage_offsets`) |
+| HWiNFO free cannot log from the command line; old Intel iGPU drivers crash it | you: shared memory (`SensorsSM=1`); `oneAPI=0` or a newer Intel driver |
+| Two harnesses at once give nonsense fps | preflight refuses to start when the GPU is busy |
+| 8 runs prove little | `--rate`; use 1 run to screen, 3 to keep, 10 to 12 for the final pass |
 
 ## How it works, short
 
@@ -46,7 +70,9 @@ Full method, rules and lessons: [docs/METHOD.md](docs/METHOD.md).
 ## Needs
 
 - Windows 10 or 11, an RTX 50 card, MSI Afterburner (4.6.7 Beta 2 and Beta 5 tested; set `HwPollPeriod=100` in
-  `Profiles\MSIAfterburner.cfg` for 100 ms telemetry).
+  `Profiles\MSIAfterburner.cfg` for 100 ms telemetry; Beta 5's "out of warranty" mode, `OEM=3`, for XBAR, SYS and
+  aux voltage telemetry and the `abwp` / `abreport` helper commands).
+- For clean 3D results: every monitor on the NVIDIA card, iGPU disabled (see Known quirks).
 - Python 3.10 or newer, on Windows or in WSL.
 - The CUDA toolkit to build `gpucheck` and `ramp` (`gpucheck/build.sh`, or `nvcc -O2 -o gpucheck.exe gpucheck.cu`).
 - For trials: 3DMark (Time Spy). For the VBIOS workflow: nvflash, Vix Editor and Vix Loader (see docs/VBIOS.md).
@@ -88,11 +114,13 @@ curve, which the card only runs at light load.
 
 | File | What it does |
 |---|---|
-| `tools/helper.ps1` | elevated helper: clock lock and cap, profile write and apply, plus `romsave`, `vix*` and `pclick` |
+| `tools/helper.ps1` | elevated helper: clock lock and cap, profile write and apply, `abwp` (Afterburner `/wp` writes such as `XBARCLK_off`), `abreport` (extended report), plus `romsave`, `vix*` and `pclick` |
 | `tools/install-tasks.ps1` | logon tasks for the helper and the clock cap |
 | `tools/mahm1.ps1` | one sample of Afterburner's live data |
 | `tools/mahmlog.ps1` | Afterburner's live data to CSV every 100 ms, flushed per line (survives a hard hang); reopens the shared memory after an Afterburner restart; logs XBAR, SYS and aux voltage when Afterburner publishes them |
 | `tools/luid.ps1` | lists DXGI adapters and their LUIDs (3DMark workloads need the current one; it changes every boot) |
+| `tools/winrect.ps1` | rectangle and window style of a running test window (tells borderless fullscreen from the fallback window) |
+| `tools/screen.ps1` | the primary display's native size (default `swapchain_resolution`) |
 | `tools/awake.ps1` | keeps the displays awake (3DMark aborts if a display sleeps) |
 | `tools/romdump.ps1` | NvAPI VBIOS image, read-only; truncated on the 5090, for a look only |
 | `tools/vbios.py` | offline VBIOS check, field list, edit with a full field diff, image diff (Vix Editor command line) |
@@ -102,6 +130,9 @@ curve, which the card only runs at light load.
 ## Tips from the 5090 run
 
 - Validate with the real 3D workload, cold and warm, not only with the search's load. Log at 100 ms while you do.
+- Check that the 3D workload really runs fullscreen on one display, with no monitor on the iGPU. Our fallback window
+  rendered 18 % fewer frames than fullscreen, so its hang rates understated the load.
+- Count runs: 16 clean runs only rule out hang rates above about 17 %, 60 above 5 %.
 - Start each voltage near its extrapolated edge (`--start`). Each edge costs a crash.
 - The clock nvidia-smi reports sits 15 to 23 MHz under any lock. The tool allows 30 MHz.
 - Measure the real top voltage first (`telemetry` at light load). Our card never went past 1.120 V, so points

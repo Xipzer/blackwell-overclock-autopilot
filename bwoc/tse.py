@@ -4,11 +4,17 @@
 Copy the workload JSON of one test from a normal run (see docs/VALIDATION.md) and this module starts that test
 directly, with no clicking, as often as needed.
 
-Four things make it reliable:
+What makes it reliable:
 
-- The workload copied from a run can carry "is_windowed": true. A window (here one spanning several monitors) is a
-  different load from fullscreen: on an RTX 5090, GT2 ran about 149 fps windowed and 154 to 170 fps fullscreen, so
-  results from the two modes do not compare. The harness always writes "is_windowed": false.
+- Display mode. A direct launch does not reliably go fullscreen. With "is_windowed": false alone (exclusive
+  fullscreen), on an RTX 5090 with four monitors only the first run after a boot went fullscreen; every later run
+  silently fell back to an ordinary 3840x2160 window (style 0x14CF0000) spread over several monitors, at about
+  141 fps instead of 172 in GT2. A copied workload can also carry "is_windowed": true. The fallback window is a
+  lighter, composited load: results in it understate GPU load and stability margin, and its fps do not compare
+  with fullscreen. The fix that held on every run: "is_windowed": false, "is_borderless": true and
+  "swapchain_resolution" = the target display's native size (borderless fullscreen, window 1920x1080 at style
+  0x94000000 on a 1080p display). The harness writes all three before every launch, and reads the test window
+  once per run (tools/winrect.ps1) so each result records the mode it really ran in.
 - The workload names the GPU by its DXGI adapter LUID, and the LUID changes on every boot. A stale one makes
   3DMark refuse the launch ("No DXGI adapter with given luid found"), which looks like a failed run. The LUID is
   looked up once per process (tools/luid.ps1) and written into the workload before each launch.
@@ -38,7 +44,11 @@ class TimeSpy:
         self.timeout = cfg.int("3dmark", "timeout", 150)
         self.poll = cfg.int("3dmark", "poll", 2)
         self.ps = cfg.get("paths", "powershell")
+        self.borderless = cfg.get("3dmark", "borderless").lower() not in ("0", "false", "no", "off")
+        self.swapchain = cfg.get("3dmark", "swapchain")
+        self.window_check = cfg.int("3dmark", "window_check", 30)
         self._luid = None
+        self._size = None
         if not (self.exe and self.workloads):
             raise SystemExit("set [3dmark] exe and workload_dir in bwoc.ini (see bwoc.example.ini)")
         if not self.workdir:
@@ -62,6 +72,34 @@ class TimeSpy:
                 raise SystemExit("no DXGI adapter matching %r in:\n%s" % (self.match, r.stdout))
         return self._luid
 
+    def _tool(self, name, *args, timeout=60):
+        return subprocess.run([self.ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                               winpath(os.path.join(HERE, "tools", name))] + list(args),
+                              capture_output=True, text=True, timeout=timeout).stdout.strip()
+
+    def size(self):
+        """[width, height] for swapchain_resolution: [3dmark] swapchain, else the primary display's native size."""
+        if self._size is None:
+            m = re.match(r"\s*(\d+)\s*x\s*(\d+)", self.swapchain or self._tool("screen.ps1"))
+            if not m:
+                raise SystemExit("set [3dmark] swapchain (for example 1920x1080) in bwoc.ini")
+            self._size = [int(m.group(1)), int(m.group(2))]
+        return self._size
+
+    def window(self):
+        """The test window now -> (mode, raw text). mode: borderless, fullscreen, windowed, none or other."""
+        name = re.sub(r"(?i)\.exe$", "", self.exe.rsplit("\\", 1)[-1])
+        raw = self._tool("winrect.ps1", "-Name", name, timeout=30)
+        m = re.match(r"rect (-?\d+),(-?\d+) -> (-?\d+),(-?\d+) style 0x([0-9A-Fa-f]+)", raw)
+        if not m:
+            return "none", raw
+        l, t, r, b, style = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5), 16)
+        if style & 0x00C00000:  # WS_CAPTION: an ordinary window (the silent fallback)
+            return "windowed", raw
+        if [r - l, b - t] == self.size():
+            return ("borderless" if self.borderless else "fullscreen"), raw
+        return "other", raw
+
     def preflight(self):
         """None if a run can start, else the reason (3DMark missing, for example on a locked drive; GPU busy)."""
         if self._pscmd("Test-Path -LiteralPath '%s'" % self.exe) != "True":
@@ -76,12 +114,14 @@ class TimeSpy:
 
     def run(self, test):
         """Start one test (workload file <test>.json in workload_dir) and wait.
-        -> dict(status=exit|reset|timeout, ok=bool, ran=bool, seconds, fps)."""
+        -> dict(status=exit|reset|timeout, ok=bool, ran=bool, seconds, fps,
+                mode=borderless|fullscreen|windowed|other|none|unchecked, window=raw window text)."""
         src = os.path.join(self.workloads, test + ".json")
         w = json.load(open(src, encoding="utf-8-sig"))
-        if w.get("dxgi_adapter_luid") != self.luid() or w.get("is_windowed") is not False:
-            w["dxgi_adapter_luid"] = self.luid()
-            w["is_windowed"] = False
+        want = {"dxgi_adapter_luid": self.luid(), "is_windowed": False, "is_borderless": self.borderless,
+                "swapchain_resolution": self.size()}
+        if any(w.get(k) != v for k, v in want.items()):
+            w.update(want)
             json.dump(w, open(src, "w", encoding="utf-8"))
         win_in, out = winpath(src), os.path.join(self.workloads, test + "-out.json")
         win_out = winpath(out)
@@ -91,9 +131,11 @@ class TimeSpy:
         start = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t0 - 1))
         pid = self._pscmd("(Start-Process -FilePath '%s' -ArgumentList '--in','\"%s\"','--out','\"%s\"' "
                           "-WorkingDirectory '%s' -PassThru).Id" % (self.exe, win_in, win_out, self.workdir)) or "0"
-        status = "timeout"
+        status, mode, raw = "timeout", "unchecked", ""
         while time.time() - t0 < self.timeout:
             time.sleep(self.poll)
+            if mode == "unchecked" and self.window_check and time.time() - t0 >= self.window_check:
+                mode, raw = self.window()
             q = self._pscmd(
                 "$p = Get-Process -Id %s -ErrorAction SilentlyContinue; $e = @(Get-WinEvent -FilterHashtable "
                 "@{LogName='System'; StartTime=[datetime]'%s'} -ErrorAction SilentlyContinue | "
@@ -107,7 +149,7 @@ class TimeSpy:
             self.kill()
         fps = self.fps(out)
         return {"status": status, "ok": status == "exit" and fps is not None, "ran": fps is not None or status == "reset",
-                "seconds": round(secs), "fps": fps}
+                "seconds": round(secs), "fps": fps, "mode": mode, "window": raw}
 
     def kill(self):
         name = re.sub(r"(?i)\.exe$", "", self.exe.rsplit("\\", 1)[-1])
@@ -148,8 +190,11 @@ def trial(ts, runs, tests=("gt2",), setup=None, stop_on_fail=True, relaunch=3, c
             retries = 0
             r.update(run=i + 1, test=test)
             results.append(r)
-            log("%s run %d %s: %s (%s after %d s, fps %s)" % (label, i + 1, test, "PASS" if r["ok"] else "FAIL",
-                                                               r["status"], r["seconds"], r["fps"]))
+            log("%s run %d %s: %s (%s after %d s, fps %s, window %s)" % (
+                label, i + 1, test, "PASS" if r["ok"] else "FAIL", r["status"], r["seconds"], r["fps"], r["mode"]))
+            if r["mode"] in ("windowed", "other"):
+                log("%s run %d: WARNING the test ran in a %s window (%s), not fullscreen on one display; this run is a "
+                    "lighter load and does not compare with fullscreen runs" % (label, i + 1, r["mode"], r["window"]))
             if not r["ok"]:
                 hangs += 1
                 time.sleep(cooldown)
@@ -163,4 +208,5 @@ def trial(ts, runs, tests=("gt2",), setup=None, stop_on_fail=True, relaunch=3, c
 
 
 def _summary(runs, hangs, results):
-    return {"runs": runs, "hangs": hangs, "passes": sum(1 for r in results if r["ok"]), "results": results}
+    return {"runs": runs, "hangs": hangs, "passes": sum(1 for r in results if r["ok"]),
+            "not_fullscreen": sum(1 for r in results if r.get("mode") in ("windowed", "other")), "results": results}

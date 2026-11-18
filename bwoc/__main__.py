@@ -112,7 +112,8 @@ def main(argv=None):
         tests = (a.tests or cfg.get("trial", "tests")).split(",")
         r = tse.trial(ts, a.runs or cfg.int("trial", "runs"), tests, setup if (a.profile or a.cap) else None,
                       not a.rate, cfg.int("trial", "relaunch"), cfg.int("trial", "cooldown"), a.label, log)
-        log("%s RESULT: %d hang(s) in %d run(s), %d clean test(s)" % (a.label, r["hangs"], r["runs"], r["passes"]))
+        log("%s RESULT: %d hang(s) in %d run(s), %d clean test(s), %d not fullscreen" % (
+            a.label, r["hangs"], r["runs"], r["passes"], r["not_fullscreen"]))
         return 1 if r["hangs"] else 0
     if a.cmd == "sweep":
         if not (a.yes or a.resume):

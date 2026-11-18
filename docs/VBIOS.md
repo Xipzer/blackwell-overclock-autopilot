@@ -39,7 +39,7 @@ Verify the editor and loader downloads against the release SHA256SUMS. The loade
 | Edit | Result |
 |---|---|
 | `power_max_w` 600 -> 700 | `power.max_limit` 700 W; Afterburner's power slider goes to 121 %. Time Spy Extreme graphics 28,223, best on this curve. But Time Spy Extreme peaked at about 592 W: the curve and the hang, not the power limit, set the result |
-| `nvvdd_rel_equation_max_mv` / `msvdd_rel_equation_max_mv` 1110 -> 1150 (and the linked `*_rel_max_mv`) | nothing measurable. The reliability (REL) voltage is computed per chip; on this card it sits near 1,070 mV, under the old 1,110 ceiling, so a higher ceiling changes nothing |
+| `nvvdd_rel_equation_max_mv` / `msvdd_rel_equation_max_mv` 1110 -> 1150 (and the linked `*_rel_max_mv`) | nothing measurable. The reliability (REL) voltage is computed per chip. Afterburner's extended report (helper `abreport`) shows NVVDD Vrel 1,120 mV and MSVDD Vrel 1,070 mV (with a -50 mV MSVDD offset) on this card; the highest load voltage we saw, 1.115 to 1.120 V, matches the NVVDD figure. An earlier version of this page said the core REL was about 1,070 mV, which mixed up the rails |
 | `msvdd_rel_equation_min_mv` 900 -> 1100 (the MSVDD REL floor) | Time Spy GT2 hang rate 4 in 9 runs (one of them a full Windows freeze) against 5 in 8 without it. Not a fix |
 
 Background, from the editor's documentation and changelog:

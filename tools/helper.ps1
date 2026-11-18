@@ -6,6 +6,12 @@
 #   rgc           nvidia-smi -rgc
 #   abwrite       copy ab-stage.cfg (this folder) over the Afterburner profile file given as -ProfileFile
 #   abprof N      MSIAfterburner.exe -ProfileN (N = 1..5)
+#   abwp NAME V   MSIAfterburner.exe /wpNAME,V, a low-level write; needs Afterburner 4.6.7 Beta 5 or later in
+#                 "out of warranty" mode (OEM=3). NAME: XBARCLK_off, SYSCLK_off, NVVDD_off_Vrel, MSVDD_off_Vrel.
+#                 Example: abwp XBARCLK_off 300 (+300 MHz crossbar clock). A driver reset or reboot clears it.
+#                 Driver 621.x ignores the two _off_Vrel voltage writes (see docs/VALIDATION.md).
+#   abreport NAME MSIAfterburner.exe /wpMAKEREPORT,8,<this folder>\NAME.txt: the extended report (SPEEDO, IDDQ,
+#                 Vrel/Vop per rail, clock domains, V/F points). Read-only. Same mode requirement as abwp.
 #   romsave       nvflash --save vbios-full-<time>.rom (this folder); read-only, needs -NvFlash
 #   vixload       vbios-loader load --gpu 0 vbios-override.rom (this folder); applies after a restart, needs -VixLoader
 #   vixunload     vbios-loader unload --gpu 0; applies after a restart
@@ -80,6 +86,16 @@ while ((Get-Date) -lt $end) {
                 'abprof' {
                     if ($a.Count -ge 2 -and $a[1] -match '^[1-5]$') { Start-Process -FilePath $Afterburner -ArgumentList ('-Profile' + $a[1]) }
                     else { $msg = 'error bad abprof' }
+                }
+                'abwp' {
+                    if ($a.Count -ge 3 -and $a[1] -match '^(XBARCLK_off|SYSCLK_off|NVVDD_off_Vrel|MSVDD_off_Vrel)$' -and $a[2] -match '^[-+]?\d{1,4}$') {
+                        Start-Process -FilePath $Afterburner -ArgumentList ('/wp' + $a[1] + ',' + $a[2])
+                    } else { $msg = 'error bad abwp' }
+                }
+                'abreport' {
+                    if ($a.Count -ge 2 -and $a[1] -match '^[\w-]+$') {
+                        Start-Process -FilePath $Afterburner -ArgumentList ('/wpMAKEREPORT,8,' + (Join-Path $dir ($a[1] + '.txt')))
+                    } else { $msg = 'error bad abreport' }
                 }
                 'romsave' { $msg = Tool $NvFlash @('--save', (Join-Path $dir ('vbios-full-' + (Get-Date -f yyyyMMdd-HHmmss) + '.rom'))) }
                 'vixload' { $msg = Tool $VixLoader @('load', '--gpu', '0', (Join-Path $dir 'vbios-override.rom')) }
