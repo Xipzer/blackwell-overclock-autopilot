@@ -44,6 +44,26 @@ def base_at(pts, mv):
     return int(round(min(pts, key=lambda p: abs(p[0] - mv))[1]))
 
 
+def monotonic(target):
+    """{mV: MHz} -> the same with every point capped at the lowest clock of any higher-voltage point (suffix
+    minimum). Raising one voltage band above the band over it makes the curve non-monotonic; the driver then picks
+    clocks that do not follow the bands, and hangs get blamed on the wrong band."""
+    out, m = {}, float("inf")
+    for v in sorted(target, reverse=True):
+        m = min(m, target[v])
+        out[v] = m
+    return out
+
+
+def softcap(pts, cap, below=1060):
+    """Offsets {mV: MHz} for a soft cap: the source curve (base + its offset) with every point at or under `below` mV
+    held to at most `cap` MHz and the points above left as they are, so light loads still reach the top of the curve
+    at higher voltage while heavy scenes stop at the cap on a flat stretch."""
+    tgt = {round(v): (min(b + o, cap) if round(v) <= below else b + o) for v, b, o in pts}
+    tgt = monotonic(tgt)
+    return {round(v): tgt[round(v)] - b for v, b, _ in pts}
+
+
 def build(text, offset_fn, source=1, work=5, power=100, vboost=100, mem_mhz=0):
     """The profile file text with the work slot replaced: source slot's curve, offset_fn(mV, base) per point."""
     head, pts, pad = curve(text, source)

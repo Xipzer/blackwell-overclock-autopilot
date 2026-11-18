@@ -9,7 +9,10 @@
 # Profiles\MSIAfterburner.cfg, or a 100 ms log only repeats each 1 s value ten times.
 # If Afterburner restarts, the old shared memory is marked dead (signature 0xDEAD) or its timestamp stops moving;
 # the log then reopens MAHMSharedMemory instead of writing stale values.
-# GPU1 is the first card; use -Gpu 2 for a second one.
+# GPU1 is the first card; use -Gpu 2 for a second one. With only one GPU in the system (no iGPU either) Afterburner
+# drops the "GPU1 " prefix ("Core clock", "GPU voltage", "Power", "Crossbar clock", ...), so every value falls back
+# to the plain name. Core voltage is "GPU voltage" then, not "Voltage". New names may also need ticking in
+# Afterburner's Monitoring tab before they are published.
 param(
     [string]$Out = (Join-Path $PSScriptRoot 'telemetry.csv'),
     [int]$IntervalMs = 100,
@@ -45,9 +48,11 @@ while ((Get-Date) -lt $end -and -not (Test-Path $StopFile)) {
         $o = $hs + $i * $es; $b = New-Object byte[] 260; [void]$v.ReadArray($o, $b, 0, 260)
         $r[([Text.Encoding]::ASCII.GetString($b)).Split([char]0)[0]] = $v.ReadSingle($o + 1300)
     }
-    $w.WriteLine(('{0},{1},{2:F3},{3:F1},{4},{5},{6},{7},{8:F3},{9}' -f (Get-Date -Format 'HH:mm:ss.fff'), $r["$g core clock"],
-        $r["$g voltage"], $r["$g power"], $r["$g usage"], $r["$g temperature"], $r["$g crossbar clock"],
-        $r["$g system clock"], $r["$g aux voltage"], $r["$g memory clock"]))
+    function G($a, $b) { if ($r.ContainsKey("$g $a")) { $r["$g $a"] } else { $r[$b] } }
+    $w.WriteLine(('{0},{1},{2:F3},{3:F1},{4},{5},{6},{7},{8:F3},{9}' -f (Get-Date -Format 'HH:mm:ss.fff'),
+        (G 'core clock' 'Core clock'), (G 'voltage' 'GPU voltage'), (G 'power' 'Power'), (G 'usage' 'GPU usage'),
+        (G 'temperature' 'GPU temperature'), (G 'crossbar clock' 'Crossbar clock'), (G 'system clock' 'System clock'),
+        (G 'aux voltage' 'Aux voltage'), (G 'memory clock' 'Memory clock')))
     Start-Sleep -Milliseconds $IntervalMs
 }
 Close-View

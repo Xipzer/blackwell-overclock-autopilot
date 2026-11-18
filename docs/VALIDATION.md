@@ -100,6 +100,10 @@ Three things to get right, all found the hard way on 18 Nov:
 - **Extra rails.** Afterburner 4.6.7 Beta 5 with the "out of warranty" voltage control option (`OEM=3` in
   `Profiles\MSIAfterburner.cfg`) adds the crossbar clock (XBAR), the system clock and the aux voltage (MSVDD) to the
   shared memory. The logger writes them in `xbar`, `sys` and `auxv`; the columns stay empty without that option.
+  With only one GPU in the system (iGPU disabled) Afterburner drops the `GPU1 ` prefix from every name
+  (`Core clock`, `GPU voltage`, `Crossbar clock`, ...); the core voltage is then `GPU voltage`, not `Voltage`. The
+  logger tries the prefixed name first and falls back to the plain one. Newly named graphs may need ticking in the
+  Monitoring tab before Afterburner publishes them.
   The same mode allows low-level writes (helper command `abwp`, for example `abwp XBARCLK_off 300`) and an extended
   report (helper command `abreport NAME`: SPEEDO, IDDQ, Vrel and Vop per rail, clock domains, V/F points). Driver
   621.x ignores `NVVDD_off_Vrel` and `MSVDD_off_Vrel` like it ignores the voltage slider.
@@ -173,13 +177,31 @@ not with real fullscreen (Profile 1 curve, 700 W limit, memory +3000, GT2 direct
 | Whole curve 45 MHz lower, XBAR +300 | **clean 12 of 12** | 157.8 to 167.2 |
 | Per voltage band vs Profile 1 (up to 980 mV +15, 981 to 1,005 -30, 1,006 to 1,030 -75, 1,031 to 1,060 -45), XBAR +300 | clean 11 of 11 (4 hangs on the way, all at 1,010 to 1,035 mV and 3,052 to 3,105 MHz) | 158.7 to 160.0 |
 
-Being repeated in borderless fullscreen with the fixed harness. Run counts: 1 run to screen a step, 3 to keep it,
+Repeated in borderless fullscreen with the fixed harness: see the next section. Run counts: 1 run to screen a step, 3 to keep it,
 10 to 12 only for the final pass. 16 clean runs bound the hang rate under about 17 % and 60 clean runs under 5 %
 (95 %, one-sided: 1 - 0.05^(1/n)); 8 runs cannot tell 5 hangs in 8 from 3.
 
 The fps "states" (about 155 in most sessions, 167 to 173 in a few, 137 to 141 later) were the display path, not
 the GPU: the fallback window, the iGPU monitor and HWiNFO's polling of the iGPU. Core clocks were the same in all
 of them.
+
+## Borderless fullscreen results (18 Nov evening)
+
+Fixed harness (`is_windowed: false`, `is_borderless: true`, swapchain 1920x1080), 700 W, memory +3000, XBAR +300:
+
+| Setup | Result | GT2 fps |
+|---|---|---|
+| Per band vs Profile 1, two passes (the second monotonic), 1,006 to 1,030 mV band from -60 down to -120 | kept hanging at 3,045 to 3,090 MHz, 1,000 to 1,020 mV | 171.6 to 174.0 |
+| Soft cap 3,045 / 3,060 / 3,075 / 3,090 MHz up to 1,060 mV | clean 3 of 3 each | 172.7 to 173.5 |
+| Soft cap 3,105 | hung on run 2 | 173.5 |
+| Soft cap 3,090, final pass | 1 hang, 3 clean (6 clean, 1 hang in 7 overall) | 172.9 to 173.3 |
+| Soft cap 3,075, final pass | 3 of 3 (6 of 6 overall) | 171.9 to 173.4 |
+| Soft cap 3,090, ReBAR forced for 3DMark | 3 of 3 | 175.4 to 175.9 |
+| same, XBAR +400 / +500 | clean (1 run / 4 runs) | 176.6 / 176.4 to 176.9 |
+
+ReBAR A/B on the same profile: 173.5 and 173.0 default, 175.5 and 175.3 forced, 173.1 off again. XBAR under load:
++300 = 2,647 MHz, +400 = 2,737, +500 = 2,775 (about 0.9 x core, the ceiling). Method and reading:
+[METHOD.md](METHOD.md#the-soft-cap-what-finally-worked).
 
 ## What did not reproduce the hang
 

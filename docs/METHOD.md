@@ -183,7 +183,7 @@ fallback window; 700 W, memory +3000, no cap, GT2 direct launches):
 | every point 45 MHz lower | clean 12 of 12 |
 | every point 45 MHz lower, XBAR +300 | clean 12 of 12 |
 | per voltage band vs Profile 1: up to 980 mV +15, 981 to 1,005 -30, 1,006 to 1,030 -75, 1,031 to 1,060 -45, XBAR +300 | clean 11 of 11 |
-| any of these in borderless fullscreen | being re-tested |
+| any of these in borderless fullscreen | per band: never converged (next section) |
 
 So the FurMark-derived curve is about 30 to 60 MHz too aggressive at every voltage for GT2. This also explains why
 the "hang zone" seemed to move whenever the curve or the cap moved: there was no zone, every point lacked the same
@@ -200,6 +200,42 @@ hang rate under about 17 %, 60 under 5 % (95 %, one-sided).
 The earlier "transient boost crash" (menus, alt-tab, light-load moments at the top of the curve) was most likely
 the same heavy-scene hang seen from the wrong end: when the GPU hangs, power falls and the clock jumps to the top,
 so the log shows a high clock at light load right before the reset.
+
+## The soft cap (what finally worked)
+
+In true borderless fullscreen (18 Nov from 16:27 UTC, about 172 fps in GT2 against 141 in the fallback window)
+the per-band search did not converge. Two findings:
+
+- **Keep the curve monotonic.** Raising a lower band above the band over it (981 to 1,005 mV at +30 against
+  1,006 to 1,030 at -60) made lower-voltage points faster than higher ones. The driver then picks clocks that do
+  not follow the bands, and hangs get blamed on the wrong band. `abcurve.monotonic()` caps every point at the
+  lowest clock of any higher-voltage point (suffix minimum).
+- **It was a clock wall, not a voltage margin.** With the fix, lowering the 1,006 to 1,030 mV band from -60 to
+  -120 MHz never stopped the hangs. They kept landing at 3,045 to 3,090 MHz while the voltage read at the hang rose
+  (1,000, 1,010, 1,015, 1,020 mV): each cut only moved the same clocks to a higher voltage point. The voltage read
+  at a hang sits about 10 mV under the V/F point in use, so do not over-trust band attribution near an edge.
+
+The fix is a soft cap: the max curve with every point up to 1,060 mV held to at most W MHz (flat from where it
+first reaches W), every point above untouched, so light loads still reach the top of the curve (3,247 MHz here) at
+higher voltage. `python -m bwoc curve --softcap W [--below 1060]` writes it to the work slot.
+
+| W (MHz), 3 runs each, XBAR +300 | Result |
+|---|---|
+| 3,045 / 3,060 / 3,075 / 3,090 | clean 3 of 3 each, 172.7 to 173.5 fps |
+| 3,105 | hung on run 2 (1,020 mV / 3,090 MHz) |
+| final pass 3,090 | 1 hang, then 3 clean: 6 clean, 1 hang in 7 overall (Profile 1, at the edge) |
+| final pass 3,075 | 3 of 3: 6 of 6 overall (Profile 2) |
+
+No fps cost (about 173 either way). In the final Profile 1 runs 5 % of heavy samples ran above 3,100 MHz at about
+1.02 V and 536 W, the rest at about 3,064 MHz, 1.015 V and 570 W. Our reading (estimate, not proven): a clock wall
+under the heaviest load, plus a flat stretch that keeps the driver from hopping between V/F points during load
+transients. Rule: when hangs land on the same clock whatever the voltage, ladder a soft cap in 15 MHz steps and
+take the last clean step as the max profile and one step under it as the safe one.
+
+Then, outside the curve: forcing Resizable BAR for the benchmark's driver profile (NVIDIA Profile Inspector,
+`rBAR - Enable` 0x000F00BA = 1) gave +1.2 % (173.3 to 175.4 fps), and the XBAR offset +400 another 0.5 %
+(176.6 fps; +500 reached the 0.9 x core ceiling with the same fps). Afterburner does not store the XBAR offset in a
+profile, so apply it with a logon task.
 
 ## Afterburner details
 
@@ -254,6 +290,9 @@ runs elevated). `bwoc/elevated.py` puts them behind one interface:
     from lowering the curve.
 13. One display adapter while measuring: a monitor on the Intel iGPU cost about 5.5 % in GT2, and HWiNFO running
     hid most of it.
+14. Hangs that land on the same clock at rising voltage are a clock wall. Margin per voltage will not fix it; a
+    soft cap in the curve did, at no fps cost.
+15. Keep edited curves monotonic, or the driver will not follow the bands and hangs get blamed on the wrong one.
 
 ## What we got wrong
 
@@ -262,6 +301,8 @@ runs elevated). `bwoc/elevated.py` puts them behind one interface:
   2,932 MHz. The zone moved with every curve or cap change because there was no zone: the whole curve lacked 30 to
   60 MHz of margin.
 - **"700 W makes it worse."** That compared runs in two different window modes. Withdrawn.
+- **"Caps do not add margin; lower the curve."** Right for `-lgc` caps in the window, wrong as the final word: in
+  true fullscreen per-band margin never stopped the hangs, and a soft cap in the curve (top untouched) did.
 - **"From 09:00 on 18 Nov the harness runs fullscreen."** It asked for fullscreen; 3DMark ran a 3840x2160 window.
   Fixed with `is_borderless: true` and a native-size swapchain (VALIDATION.md).
 - **"Memory +3000 might be the cause."** Memory at +0 also hung (windowed, run 2, a hard freeze seen in the

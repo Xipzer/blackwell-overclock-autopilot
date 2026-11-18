@@ -50,6 +50,9 @@ def main(argv=None):
     v = sub.add_parser("curve", help="show a profile's V/F curve, or write a uniform offset to the work profile")
     v.add_argument("--profile", type=int, help="profile to show (default: source_profile)")
     v.add_argument("--offset", type=int, help="write this offset to every point of the work profile")
+    v.add_argument("--softcap", type=int, help="write the source curve with every point at or under --below mV held "
+                   "to at most this clock (points above untouched) to the work profile")
+    v.add_argument("--below", type=int, default=1060, help="soft cap voltage limit in mV (default 1060)")
     v.add_argument("--apply", action="store_true", help="also apply the work profile")
     v.add_argument("--range", default="800,1250", help="mV range to show")
 
@@ -82,11 +85,15 @@ def main(argv=None):
         print(hangscan.report(ev))
         print("%d hang signature(s)" % len(ev), file=sys.stderr)
         return 0
-    if a.cmd == "curve" and a.offset is None:
+    if a.cmd == "curve" and a.offset is None and a.softcap is None:
         lo, hi = ints(a.range)
         print(abcurve.show(abcurve.read(cfg.profile_file()), a.profile or cfg.int("afterburner", "source_profile"), lo, hi))
         return 0
     el = Elevated(cfg)
+    if a.cmd == "curve" and a.softcap:
+        src = abcurve.curve(abcurve.read(cfg.profile_file()), cfg.int("afterburner", "source_profile"))[1]
+        offs = abcurve.softcap(src, a.softcap, a.below)
+        return 0 if abcurve.write_work(cfg, el, lambda mv, f: offs[round(mv)], apply=a.apply) else 1
     if a.cmd == "curve":
         return 0 if abcurve.write_work(cfg, el, lambda mv, f: a.offset, apply=a.apply) else 1
     if a.cmd == "profile":

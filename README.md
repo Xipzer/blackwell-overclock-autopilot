@@ -30,6 +30,12 @@ Founders Edition (water-cooled).** Results are in
   had fallen back to a 3840x2160 window, a lighter load. The `tse` harness now forces borderless fullscreen
   (`is_borderless: true`, native-size swapchain), which held on every run, and records the real window mode per run.
   See [Known quirks](#known-quirks).
+- **Final (18 Nov evening, borderless fullscreen):** per-band margin never stopped the hangs; they kept landing at
+  3,045 to 3,090 MHz whatever the voltage, a heavy-load clock wall. A **soft cap in the curve** fixed it: every
+  point up to 1,060 mV held flat at a cap, points above untouched (`python -m bwoc curve --softcap 3090`). Cap
+  3,090 = 6 clean, 1 hang in 7 (Profile 1, max); cap 3,075 = 6 of 6 (Profile 2); no fps cost (about 173 in GT2).
+  Forcing Resizable BAR for 3DMark (+1.2 %) and XBAR +400 brought GT2 to 176.6 fps. See
+  [docs/METHOD.md](docs/METHOD.md#the-soft-cap-what-finally-worked).
 
 Not built yet: writing a per-point curve from the results and the isolated re-test are still done by hand, and the
 3D (FurMark) search is not in this repo yet. See [docs/METHOD.md](docs/METHOD.md).
@@ -55,6 +61,10 @@ this tool handles or depends on:
 | HWiNFO free cannot log from the command line; old Intel iGPU drivers crash it | you: shared memory (`SensorsSM=1`); `oneAPI=0` or a newer Intel driver |
 | Two harnesses at once give nonsense fps | preflight refuses to start when the GPU is busy |
 | 8 runs prove little | `--rate`; use 1 run to screen, 3 to keep, 10 to 12 for the final pass |
+| Per-band offsets can make the curve non-monotonic and pin hangs on the wrong band | `abcurve.monotonic()` caps each point at the lowest clock above it; `--softcap` output is monotonic |
+| With one GPU (iGPU off), Afterburner drops the `GPU1 ` prefix (core voltage = `GPU voltage`) | `mahmlog.ps1` and `mahm1.ps1` fall back to the plain names |
+| 3DMark Time Spy does not use Resizable BAR by default | you: NVIDIA Profile Inspector, "3DMark TimeSpy" profile, `rBAR - Enable` (0x000F00BA) = 1 (+1.2 % GT2 here) |
+| XBAR offset is not stored in a profile | you: a logon task running `MSIAfterburner.exe /wpXBARCLK_off,400` (or `abwp XBARCLK_off 400`) |
 
 ## How it works, short
 
@@ -101,6 +111,7 @@ Full method, rules and lessons: [docs/METHOD.md](docs/METHOD.md).
 | `python -m bwoc sweep ... --resume` | continue after a crash (use from a logon task) |
 | `python -m bwoc curve [--profile N]` | show a profile's V/F curve |
 | `python -m bwoc curve --offset 300 --apply` | write one offset to every point of the work slot and apply it |
+| `python -m bwoc curve --softcap 3090 [--below 1060] [--apply]` | soft cap: the source curve with every point at or under `--below` mV held to at most the cap, points above untouched, written to the work slot |
 | `python -m bwoc cap 3330` / `cap --reset` | set or remove the clock cap |
 | `python -m bwoc profile N` | apply an Afterburner slot |
 | `python -m bwoc telemetry` | one line of live clock, voltage, power and load |
@@ -117,7 +128,7 @@ curve, which the card only runs at light load.
 | `tools/helper.ps1` | elevated helper: clock lock and cap, profile write and apply, `abwp` (Afterburner `/wp` writes such as `XBARCLK_off`), `abreport` (extended report), plus `romsave`, `vix*` and `pclick` |
 | `tools/install-tasks.ps1` | logon tasks for the helper and the clock cap |
 | `tools/mahm1.ps1` | one sample of Afterburner's live data |
-| `tools/mahmlog.ps1` | Afterburner's live data to CSV every 100 ms, flushed per line (survives a hard hang); reopens the shared memory after an Afterburner restart; logs XBAR, SYS and aux voltage when Afterburner publishes them |
+| `tools/mahmlog.ps1` | Afterburner's live data to CSV every 100 ms, flushed per line (survives a hard hang); reopens the shared memory after an Afterburner restart; logs XBAR, SYS and aux voltage when Afterburner publishes them; handles names with and without the `GPU1 ` prefix |
 | `tools/luid.ps1` | lists DXGI adapters and their LUIDs (3DMark workloads need the current one; it changes every boot) |
 | `tools/winrect.ps1` | rectangle and window style of a running test window (tells borderless fullscreen from the fallback window) |
 | `tools/screen.ps1` | the primary display's native size (default `swapchain_resolution`) |
@@ -139,7 +150,10 @@ curve, which the card only runs at light load.
   above it are never used.
 - If several voltages fail at the same offset, re-test with only the point under test raised.
 - A clock cap (`nvidia-smi -lgc 210,MAX`) only helps if it sits under the clocks where the card fails. A driver
-  reset clears it, so re-apply it after every reset.
+  reset clears it, so re-apply it after every reset. A soft cap written into the curve (`curve --softcap`) needs
+  no background tool and survives resets once the profile is applied again.
+- If hangs land on the same clock whatever the voltage, stop adding margin per voltage: it is a clock wall. Find
+  it with a soft cap ladder (15 MHz steps, 3 runs each) and keep the top of the curve.
 - Check the GPU is idle and the displays will stay awake before an unattended run.
 
 ## The suite
