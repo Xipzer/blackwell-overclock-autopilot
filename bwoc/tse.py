@@ -4,8 +4,11 @@
 Copy the workload JSON of one test from a normal run (see docs/VALIDATION.md) and this module starts that test
 directly, with no clicking, as often as needed.
 
-Three things make it reliable:
+Four things make it reliable:
 
+- The workload copied from a run can carry "is_windowed": true. A window (here one spanning several monitors) is a
+  different load from fullscreen: on an RTX 5090, GT2 ran about 149 fps windowed and 154 to 170 fps fullscreen, so
+  results from the two modes do not compare. The harness always writes "is_windowed": false.
 - The workload names the GPU by its DXGI adapter LUID, and the LUID changes on every boot. A stale one makes
   3DMark refuse the launch ("No DXGI adapter with given luid found"), which looks like a failed run. The LUID is
   looked up once per process (tools/luid.ps1) and written into the workload before each launch.
@@ -76,8 +79,9 @@ class TimeSpy:
         -> dict(status=exit|reset|timeout, ok=bool, ran=bool, seconds, fps)."""
         src = os.path.join(self.workloads, test + ".json")
         w = json.load(open(src, encoding="utf-8-sig"))
-        if w.get("dxgi_adapter_luid") != self.luid():
+        if w.get("dxgi_adapter_luid") != self.luid() or w.get("is_windowed") is not False:
             w["dxgi_adapter_luid"] = self.luid()
+            w["is_windowed"] = False
             json.dump(w, open(src, "w", encoding="utf-8"))
         win_in, out = winpath(src), os.path.join(self.workloads, test + "-out.json")
         win_out = winpath(out)

@@ -15,14 +15,16 @@ Getting the workload files, once:
 1. Start a normal run of the test (for example a Time Spy Extreme custom run with only Graphics Test 2).
 2. While it runs, read the test process's command line, in PowerShell:
    `Get-CimInstance Win32_Process -Filter "Name='3DMarkTimeSpy.exe'" | Select-Object -Expand CommandLine`
-3. Copy the file given after `--in` to `workload_dir` as `gt2.json` (and the same for `gt1.json`). Keep the key
-   `dxgi_adapter_luid`; the tool rewrites it.
+3. Copy the file given after `--in` to `workload_dir` as `gt2.json` (and the same for `gt1.json`). Keep the keys
+   `dxgi_adapter_luid` and `is_windowed`; the tool rewrites both (the LUID to the current one, `is_windowed` to
+   `false`).
 4. Set `[3dmark] exe` to the test binary (`...\3DMark\dlc\time-spy-test\bin\x64\3DMarkTimeSpy.exe` for Time Spy).
 
 What the tool handles:
 
 | Problem | What happens | Handling |
 |---|---|---|
+| The copied workload runs windowed | `"is_windowed": true` gave a window spread over several monitors and a different load: GT2 at about 149 fps instead of 154 to 170 fps fullscreen | `is_windowed` is forced to `false` before each launch |
 | The DXGI adapter LUID changes on every boot | 3DMark refuses the launch: "No DXGI adapter with given luid found". It looks like a failed run | `tools/luid.ps1` lists the adapters; the LUID is written into the workload before each launch |
 | A hang takes minutes to notice | waiting for the process to end cost up to 150 s per hang | every 2 s one PowerShell call checks the process and the System log (event 4101, any nvlddmkm event) |
 | A launch that never ran | locked drive, stale LUID, sleeping display: no result and no reset | not counted; relaunched up to `trial.relaunch` times |
@@ -38,8 +40,8 @@ python -m bwoc tse --tests gt1,gt2 --runs 4                   # both tests, back
 A run passes when the process exits by itself, 3DMark wrote a result, and no driver reset was logged.
 
 Back-to-back direct launches are harsher than full 3DMark runs. On the 5090 the same setup hung 5 times in 8 direct
-GT2 runs while full app runs (with demo, loading and the CPU test between graphics tests) passed. Use the harness to
-compare settings with each other, not to predict how often a full run fails.
+GT2 runs (windowed; 3 in 8 fullscreen) while full app runs (with demo, loading and the CPU test between graphics
+tests) passed. Use the harness to compare settings with each other, not to predict how often a full run fails.
 
 ## Displays must stay awake
 
@@ -50,12 +52,30 @@ screens over DDC is fine; sleep is not.
 ## Telemetry at 100 ms (`tools/mahmlog.ps1`)
 
 nvidia-smi does not report core voltage and its 1 s sampling misses the event. `tools/mahmlog.ps1` reads
-Afterburner's shared memory every 100 ms and writes `time,clock,voltage,power,usage,temp`, flushing each line, so
-the log survives a hard hang up to the last sample.
+Afterburner's shared memory every 100 ms and writes `time,clock,voltage,power,usage,temp,xbar,sys,auxv,mem`,
+flushing each line, so the log survives a hard hang up to the last sample.
 
 ```
 powershell -ExecutionPolicy Bypass -File tools\mahmlog.ps1 -Out C:\bwoc\telemetry.csv
 ```
+
+Three things to get right, all found the hard way on 18 Nov:
+
+- **Afterburner's own polling period.** Afterburner reads the hardware every `HwPollPeriod` ms, and the default is
+  1000. A 100 ms log then repeats each 1 s value ten times. Set `HwPollPeriod=100` in `Profiles\MSIAfterburner.cfg`.
+  The global settings live in that file, not in the `MSIAfterburner.cfg` next to the exe (that one still read 1000
+  after the change). On the 5090 every "100 ms" log before 18 Nov was really 1 s data.
+- **Afterburner restarts.** If Afterburner restarts while a logger holds `MAHMSharedMemory` open, the new instance
+  does not publish into the old mapping: the logger keeps reading frozen values (the signature at offset 0 becomes
+  `0xDEAD`, or the timestamp at offset 20 stops moving). On the 5090 this left two whole series of fullscreen runs
+  with a flat log, including the hang with a 3,090 MHz cap. The logger now checks the signature and the timestamp
+  and reopens the mapping when either goes stale (`-StaleSeconds`, default 5).
+- **Extra rails.** Afterburner 4.6.7 Beta 5 with the "out of warranty" voltage control option (`OEM=3` in
+  `Profiles\MSIAfterburner.cfg`) adds the crossbar clock (XBAR), the system clock and the aux voltage (MSVDD) to the
+  shared memory. The logger writes them in `xbar`, `sys` and `auxv`; the columns stay empty without that option.
+
+HWiNFO can log effective clocks too, but only HWiNFO Pro can start and stop logging from the command line, so it
+does not fit an unattended harness on the free version.
 
 For the clock limit reasons (power cap, thermal, reliability voltage), log nvidia-smi alongside it:
 
@@ -73,6 +93,18 @@ Every Time Spy hang on the 5090 had the same shape in the 100 ms log:
    boost crash but it is a symptom: the GPU had already hung.
 4. A driver reset (event 4101, nvlddmkm event 14 "PF FLR") 2 to 15 s later, or a full Windows freeze.
 
+With true 100 ms polling (after the `HwPollPeriod` fix above) one more step shows up between 1 and 2: the readings
+freeze for a few samples. One fullscreen hang (cap 3,060 MHz, 700 W, 18 Nov):
+
+| Time (UTC) | Clock | Voltage | Power | Usage | Core | XBAR | SYS | Aux |
+|---|---|---|---|---|---|---|---|---|
+| 09:39:06.328 | 2,932 | 0.960 V | 528.7 W | 100 % | 47 C | 2,407 | 2,437 | 1.040 V |
+| 09:39:06.438 to .765 | 2,932 | 0.960 V | 427.2 W (same value, 4 samples) | 100 % | 47 C | 2,407 | 2,437 | 1.040 V |
+| 09:39:06.873 | 3,052 | 0.975 V | 116.0 W | 100 % | 36 C | 2,475 | 2,520 | 1.055 V |
+
+The harness saw the driver reset about 20 s after the freeze. XBAR, SYS and the aux voltage were steady right up
+to the hang, with no dip or spike before it, so they gave no trigger signature.
+
 A normal scene change or loading screen drops usage together with power, so it does not match. The scanner flags a
 sample over `--heavy-w` (400 W) followed within `--window` (3 s) by at least `--min-low` (1 s) of samples under
 `--low-w` (200 W) at `--busy-pct` (95 %) usage or more:
@@ -81,9 +113,30 @@ sample over `--heavy-w` (400 W) followed within `--window` (3 s) by at least `--
 python -m bwoc hangscan telemetry.csv > hangs.csv
 ```
 
-On the 5090's log of 17 and 18 Nov it found every logged Time Spy hang. Its false positives were runs of the CUDA
+On the 5090's log of 17 and 18 Nov it found every logged Time Spy hang but one: a windowed hard freeze, logged at
+1 s polling, whose last heavy sample was only about 310 W (under `--heavy-w`). Its false positives were runs of the CUDA
 load-ramp test (`gpucheck/ramp.cu`), which holds the GPU at 100 % usage and 170 W on purpose. Check flagged times
 against what was running.
+
+## Re-tests in fullscreen (18 Nov)
+
+Every harness hang rate before 18 Nov 09:00 UTC was measured windowed. Re-run fullscreen (Profile 1 curve, 700 W
+limit, memory +3000, GT2 direct launches):
+
+| Setup | Result | GT2 fps (passing runs) |
+|---|---|---|
+| Profile 1 as is | 3 hangs in 8 runs (windowed: 5 in 8) | 154.5 to 156.3 |
+| Cap 3,090 MHz (`-lgc 210,3090`) | hung on run 4 of 12 | 167.1 to 167.9 |
+| Cap 3,060 MHz | hung on run 9 of 12 (real 2,932 MHz at 960 mV, about 530 W, 47 C) | 152.4 to 153.6 |
+| Whole curve 30 MHz lower at every voltage, no cap | hung on run 6 of 12 | 154.8 to 155.4 |
+| Whole curve 60 MHz lower at every voltage, no cap | **clean 12 of 12** | 153.6 to 155.1 |
+
+Pending: the curve 45 MHz lower (12 runs), and the 60 MHz lower curve extended to 60 runs in total (0 hangs in 60
+would put the hang rate under 5 % at 95 % confidence).
+
+Two windows with the same settings scored 167 to 170 fps instead of about 155; three later sessions with an
+Afterburner restart between them all scored 153.6 to 156.0, uncapped or with the 3,090 cap. Why is still being
+investigated.
 
 ## What did not reproduce the hang
 

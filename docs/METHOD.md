@@ -137,9 +137,11 @@ FurMark 3D limits on the 5090 (real clocks, everyday water): 850 mV 1,800; 875 m
 1. Each point gets the highest real clock the 3D search proved at that voltage. Points in between are
    interpolated; a point never gets less clock than a lower voltage.
 2. Flatten the top: above the voltage where the clock stops rising, keep it flat, so the curve caps itself.
-3. Validate with the real workload, cold and warm: Time Spy Extreme (or its GT2 alone, with the trial harness, see
-   [VALIDATION.md](VALIDATION.md)), the Steel Nomad Stress Test, and a hot run.
-4. Every crash: read the 100 ms telemetry before changing anything (`python -m bwoc hangscan`).
+3. Validate with the real workload, fullscreen, cold and warm: Time Spy Extreme (or its GT2 alone, with the trial
+   harness, see [VALIDATION.md](VALIDATION.md)), the Steel Nomad Stress Test, and a hot run.
+4. If GT2 hangs, lower the whole curve uniformly (see "Margin" below) before reshaping single points or adding caps.
+   On the 5090 the curve needed 30 to 60 MHz less at every voltage.
+5. Every crash: read the 100 ms telemetry before changing anything (`python -m bwoc hangscan`).
 
 The 5090's max curve (Profile 1): 950 mV 3,015, 1000 mV 3,120, 1025 mV 3,202, 1050 mV 3,240, flat 3,247 from about
 1,075 mV, memory +3000. Warm it passed 3 Time Spy Extreme runs and the Steel Nomad Stress Test (99.2 %). Cold, it
@@ -152,8 +154,38 @@ reboot, and a driver reset clears it, so `tools/install-tasks.ps1 -CapMax N` add
 4101 (or a tray app that re-sends it every minute) puts it back after a reset.
 
 What a cap can and cannot do: it only limits clocks above it. On the 5090, caps at 3,202 and 3,232 MHz did nothing
-for the GT2 hang, because heavy scenes never reach those clocks. Caps at 3,060 and 3,090 MHz held heavy scenes under
-the hang zone and passed 13 of 13 cold GT2 runs at 600 W.
+for the GT2 hang, because heavy scenes never reach those clocks. Caps at 3,060 and 3,090 MHz passed 13 of 13 cold
+GT2 runs at 600 W, but those runs were windowed (a different load, see [VALIDATION.md](VALIDATION.md)). Fullscreen at
+700 W both hung: 3,090 on run 4 of 12, 3,060 on run 9 of 12 (real 2,932 MHz at 960 mV, about 530 W, 47 C).
+
+A cap does not add margin. It only moves the operating point along the same overclocked curve: at 3,060 MHz the
+card runs a lower voltage point that has the same too-small margin as every other point. To gain margin, lower the
+curve itself (next section).
+
+The power limit is a ceiling in the same way: it only matters when the card reaches it. Fullscreen GT2 on this card
+drew about 460 to 560 W, under a 700 W limit. Our earlier reading that 700 W itself made the 3,060 and 3,090 caps
+hang compared windowed runs at 600 W with fullscreen runs at 700 W, so it is withdrawn. One open point: a short
+fullscreen series at a 600 W setting (2 runs, cap 3,060) ran about 110 MHz lower than the same cap at 700 W while
+drawing only about 460 W, so something other than the power limit held it back there. Not yet explained.
+
+## Margin: shift the whole curve
+
+The per-voltage search (FurMark in 3D) finds the edge at each voltage under a steady load. Time Spy GT2's heaviest
+scenes need more margin than that at every voltage. On the 5090 (fullscreen, 700 W, memory +3000, no cap, GT2
+direct launches):
+
+| Curve | Result |
+|---|---|
+| Profile 1 as found | 3 hangs in 8 runs |
+| every point 30 MHz lower | hung on run 6 of 12 |
+| every point 60 MHz lower | clean 12 of 12 (cost: about 1 fps, 153.6 to 155.1 vs 154.5 to 156.3) |
+| every point 45 MHz lower | pending |
+| 60 MHz lower, 60 runs in total | pending |
+
+So the FurMark-derived curve is about 30 to 60 MHz too aggressive at every voltage for GT2. This also explains why
+the "hang zone" seemed to move whenever the curve or the cap moved: there was no zone, every point lacked the same
+margin. Rule: after the per-voltage search, lower the whole curve uniformly in 15 to 30 MHz steps until a long
+fullscreen GT2 series is clean, then keep that shift.
 
 `-lgc F,F` (min = max) does not hold F on Blackwell under a heavy 3D load: the card ran about 100 MHz under it.
 
@@ -172,6 +204,10 @@ so the log shows a high clock at light load right before the reset.
 - `MSIAfterburner.exe -Profile5` applies slot 5 to a running Afterburner.
 - The core voltage appears in Afterburner's shared memory (`MAHMSharedMemory`) only after enabling the voltage
   graph in Settings, Monitoring. nvidia-smi does not report voltage.
+- Global settings (polling period `HwPollPeriod`, voltage control mode `OEM`) live in
+  `Profiles\MSIAfterburner.cfg`, not in the `MSIAfterburner.cfg` next to the exe. `HwPollPeriod` defaults to 1000 ms;
+  set 100 for 100 ms telemetry. With 4.6.7 Beta 5, `OEM=3` ("out of warranty" voltage control) also publishes the
+  crossbar clock, system clock and aux voltage.
 - Only the work slot is written. Your other slots are never touched.
 
 ## Elevated actions
@@ -203,3 +239,18 @@ runs elevated). `bwoc/elevated.py` puts them behind one interface:
    on its fifth run; that only became clear with repeated runs and the 100 ms log.
 10. Every step changed only one thing, and every result is in the journal with its conditions (water temperature,
     driver state, VBIOS). Cold and warm runs are different tests.
+11. Check how the benchmark actually runs. A copied 3DMark workload ran windowed across several monitors, a different
+    load from fullscreen; every harness hang rate before that was found was measured in the wrong mode.
+12. Caps and power limits do not add margin. They move the operating point along the same curve. Margin comes
+    from lowering the curve.
+
+## What we got wrong
+
+- **"The hang lives in a clock zone around 3,000 to 3,150 MHz."** Caps under the zone looked clean (13 of 13 at
+  600 W), but those runs were windowed. Fullscreen, caps of 3,090 and 3,060 MHz both hung, the latter at a real
+  2,932 MHz. The zone moved with every curve or cap change because there was no zone: the whole curve lacked 30 to
+  60 MHz of margin.
+- **"700 W makes it worse."** That compared windowed 600 W runs with fullscreen 700 W runs. Withdrawn.
+- **"Memory +3000 might be the cause."** Memory at +0 also hung (windowed, run 2, a hard freeze seen in the
+  telemetry log; the PC froze before the harness could record it), so it is not the sole cause.
+- **"Our logs are 100 ms."** Afterburner polled at 1 s until 18 Nov, so the logs repeated each value ten times.

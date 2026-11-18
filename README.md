@@ -45,7 +45,8 @@ Full method, rules and lessons: [docs/METHOD.md](docs/METHOD.md).
 
 ## Needs
 
-- Windows 10 or 11, an RTX 50 card, MSI Afterburner (4.6.7 Beta 2 tested).
+- Windows 10 or 11, an RTX 50 card, MSI Afterburner (4.6.7 Beta 2 and Beta 5 tested; set `HwPollPeriod=100` in
+  `Profiles\MSIAfterburner.cfg` for 100 ms telemetry).
 - Python 3.10 or newer, on Windows or in WSL.
 - The CUDA toolkit to build `gpucheck` and `ramp` (`gpucheck/build.sh`, or `nvcc -O2 -o gpucheck.exe gpucheck.cu`).
 - For trials: 3DMark (Time Spy). For the VBIOS workflow: nvflash, Vix Editor and Vix Loader (see docs/VBIOS.md).
@@ -90,7 +91,7 @@ curve, which the card only runs at light load.
 | `tools/helper.ps1` | elevated helper: clock lock and cap, profile write and apply, plus `romsave`, `vix*` and `pclick` |
 | `tools/install-tasks.ps1` | logon tasks for the helper and the clock cap |
 | `tools/mahm1.ps1` | one sample of Afterburner's live data |
-| `tools/mahmlog.ps1` | Afterburner's live data to CSV every 100 ms, flushed per line (survives a hard hang) |
+| `tools/mahmlog.ps1` | Afterburner's live data to CSV every 100 ms, flushed per line (survives a hard hang); reopens the shared memory after an Afterburner restart; logs XBAR, SYS and aux voltage when Afterburner publishes them |
 | `tools/luid.ps1` | lists DXGI adapters and their LUIDs (3DMark workloads need the current one; it changes every boot) |
 | `tools/awake.ps1` | keeps the displays awake (3DMark aborts if a display sleeps) |
 | `tools/romdump.ps1` | NvAPI VBIOS image, read-only; truncated on the 5090, for a look only |
