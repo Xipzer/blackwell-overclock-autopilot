@@ -101,31 +101,65 @@ exposure is the same as a power cut, which NTFS journaling covers. Every check w
 Clocks are lock targets in MHz. Most edges ended in a driver hang and a 0x133 bugcheck; one ended in driver resets
 that recovered. Full data: [blackwell-field-notes](https://github.com/Xipzer/blackwell-field-notes).
 
+## Compute limits are not 3D limits
+
+A curve built from these compute limits (each point at its clean limit minus 45 MHz) crashed Time Spy Extreme at
+once. Bisecting by voltage region in Time Spy showed the 3D limits 30 to 75 MHz under the compute limits (1000 mV:
++480 in compute, +405 in 3D). The compute check alone cannot set a 3D curve.
+
+## The 3D search (FurMark) and why it overstates limits
+
+The same per-point method with FurMark 2 (Vulkan, artifact scanner on) as the load: the offset only at and above
+the voltage under test (+300 below), the clock locked, 30 to 60 s per step, the live voltage read from Afterburner,
+and a watchdog that kills FurMark if it hangs after a driver reset. Two lessons cost most of a day:
+
+- **A heavy steady load overstates the limit.** Under a full FurMark load the core is hot, and the driver drops
+  temperature bins of about 15 MHz each, so a step "at 3,150 MHz" really ran at 3,060 to 3,100 MHz. FurMark passed
+  1000 mV at +435 while Time Spy crashed at +420 with 3,150 to 3,172 MHz real. The search now shrinks the FurMark
+  window (lighter load, cooler core) until the real clock is within 50 MHz of the lock, and records the real clock.
+  Limits are kept in real MHz, not offsets.
+- **Temperature bins move the whole curve.** A cold core (water 22 to 27 C) runs one or two bins higher at every
+  voltage than a warm one. A curve tuned warm can fail cold. Tune or at least validate at the coldest condition
+  the card will see.
+- **A driver reset drops the curve and the lock**, and the next step then runs at stock settings and looks like a
+  pass. A step whose median voltage is more than 20 mV over the target now counts as a failure (settings lost).
+
+Offsets written into Afterburner's profile file are applied as written, at any temperature; the temperature
+dependence comes from the driver's bins on top. Afterburner's curve editor works on the clocks shown at the
+current temperature, so a curve dragged into shape warm gives different offsets from one dragged cold. Write
+curves to the profile file (as this tool does), not through the editor.
+
+FurMark 3D limits on the 5090 (real clocks, everyday water): 850 mV 1,800; 875 mV 2,122; 900 mV 2,332;
+950 mV 3,000; 1000 mV 3,120; 1025 mV 3,157 to 3,202; 1050 mV 3,240; 1075 mV 3,247; 1100 mV 3,277.
+
 ## From limits to a curve
 
-Done by hand for now:
+1. Each point gets the highest real clock the 3D search proved at that voltage. Points in between are
+   interpolated; a point never gets less clock than a lower voltage.
+2. Flatten the top: above the voltage where the clock stops rising, keep it flat, so the curve caps itself.
+3. Validate with the real workload, cold and warm: Time Spy Extreme (or its GT2 alone, with the trial harness, see
+   [VALIDATION.md](VALIDATION.md)), the Steel Nomad Stress Test, and a hot run.
+4. Every crash: read the 100 ms telemetry before changing anything (`python -m bwoc hangscan`).
 
-1. Each tested point gets its clean offset minus 45 MHz (3 bins). Points in between are interpolated.
-2. Points under the lowest tested voltage keep a known safe offset.
-3. Points above the real top voltage do not matter; give them the top point's offset.
-4. Cap the clock (`nvidia-smi -lgc 210,MAX`) at or under the highest clean top clock.
-5. Validate: a benchmark, a stress test, and a run with hot water (45 C on the 5090).
+The 5090's max curve (Profile 1): 950 mV 3,015, 1000 mV 3,120, 1025 mV 3,202, 1050 mV 3,240, flat 3,247 from about
+1,075 mV, memory +3000. Warm it passed 3 Time Spy Extreme runs and the Steel Nomad Stress Test (99.2 %). Cold, it
+hangs in one heavy scene of Time Spy GT2; see the field notes.
 
-On the 5090 this gave +450 at 900 and 950 mV, +435 at 1000, +405 at 1050, +390 at 1100 to 1125, +300 below
-880 mV, a 3,330 MHz cap, and 15,678 in Steel Nomad (+2.6 % over a +180 uniform offset). The stress test and the hot
-run are pending.
+## Clock caps
 
-## Transient boost spikes and the clock cap
+`nvidia-smi -lgc 210,<cap>` keeps the idle range and cuts off the top. It needs admin rights, does not survive a
+reboot, and a driver reset clears it, so `tools/install-tasks.ps1 -CapMax N` adds a logon task, and a task on event
+4101 (or a tray app that re-sends it every minute) puts it back after a reset.
 
-With a large offset, light-load moments (menus, alt-tab, loading screens) let the card jump to the top of the
-curve, around 3,200 MHz on the 5090, a point no game load ever runs and nothing had tested. That crashed the
-driver. The fix: `nvidia-smi -lgc 210,<cap>` keeps the full idle range but cuts off the top. It needs admin
-rights and does not survive a reboot, so `tools/install-tasks.ps1 -CapMax N` adds a logon task.
+What a cap can and cannot do: it only limits clocks above it. On the 5090, caps at 3,202 and 3,232 MHz did nothing
+for the GT2 hang, because heavy scenes never reach those clocks. Caps at 3,060 and 3,090 MHz held heavy scenes under
+the hang zone and passed 13 of 13 cold GT2 runs at 600 W.
 
-After the per-voltage search the 5090's top ran 3,315 to 3,352 MHz with 0 errors, and the old spike crash did not
-come back (the card runs cooler on water now), so its cap went up to 3,330.
+`-lgc F,F` (min = max) does not hold F on Blackwell under a heavy 3D load: the card ran about 100 MHz under it.
 
-A matching public report: https://rog-forum.asus.com/t5/gaming-notebooks/rtx-5090-laptop-gpu-hang-and-video-tdr-failure-regression/td-p/1157396/page/2
+The earlier "transient boost crash" (menus, alt-tab, light-load moments at the top of the curve) was most likely
+the same heavy-scene hang seen from the wrong end: when the GPU hangs, power falls and the clock jumps to the top,
+so the log shows a high clock at light load right before the reset.
 
 ## Afterburner details
 
@@ -149,6 +183,8 @@ runs elevated). `bwoc/elevated.py` puts them behind one interface:
 - `mode = helper`: Python runs unelevated (or in WSL) and writes one line to `helper_dir/cmd.txt`;
   `tools/helper.ps1`, running elevated, executes it and writes `ack.txt` (`ok ...` or `error ...`). It accepts
   only `lgc MIN MAX`, `rgc`, `abwrite`, `abprof N` and `quit`, with checked arguments, and exits after 12 hours.
+  Optional extras, used by hand: `romsave`, `vixload`, `vixunload`, `vixverify`, `vixstatus` (see
+  [VBIOS.md](VBIOS.md)) and `pclick PROC X Y` (see [VALIDATION.md](VALIDATION.md)).
 
 ## Lessons
 
@@ -159,5 +195,11 @@ runs elevated). `bwoc/elevated.py` puts them behind one interface:
 4. Most edges ended in a hang and a 0x133 bugcheck, not a clean driver reset. Plan for reboots.
 5. Measure the real top voltage before searching above it, and read the live voltage from Afterburner.
 6. Files written just before a crash can be lost, as with a power cut. Commit and sync before each step.
-7. A clock that passes a compute check is not the whole story: the transient boost to the top of the curve is
-   what crashed in normal use.
+7. A clock that passes a compute check is not the whole story. 3D limits sat 30 to 110 MHz lower.
+8. Log at 100 ms before tuning by crash. The clock jump before a reset is a symptom; the 100 ms log shows the GPU
+   hung in a heavy phase first.
+9. Run the controlled test before changing the curve: the same setting, the same condition, N runs. Lowering the
+   1000 to 1025 mV points by 15 or 30 MHz did not stop the hang, and the whole curve minus 30 MHz most likely hung
+   on its fifth run; that only became clear with repeated runs and the 100 ms log.
+10. Every step changed only one thing, and every result is in the journal with its conditions (water temperature,
+    driver state, VBIOS). Cold and warm runs are different tests.

@@ -1,0 +1,128 @@
+# Validation: Time Spy trials, the hang signature, telemetry
+
+The per-voltage search ([METHOD.md](METHOD.md)) finds what each point survives under a steady load. Real 3D work
+failed 30 to 110 MHz lower on the RTX 5090, and its failure was a different kind: a hang in one heavy scene of
+Time Spy Extreme Graphics Test 2. This page covers the tools built to test that case without clicking, and what they
+found. The full story and the numbers are in [blackwell-field-notes](https://github.com/Xipzer/blackwell-field-notes).
+
+## Direct 3DMark launches (`python -m bwoc tse`)
+
+3DMark starts each graphics test as its own process, `3DMarkTimeSpy.exe --in <workload.json> --out <result.json>`.
+With a copy of the workload file you can start one test directly, as often as you like, with no 3DMark window.
+
+Getting the workload files, once:
+
+1. Start a normal run of the test (for example a Time Spy Extreme custom run with only Graphics Test 2).
+2. While it runs, read the test process's command line, in PowerShell:
+   `Get-CimInstance Win32_Process -Filter "Name='3DMarkTimeSpy.exe'" | Select-Object -Expand CommandLine`
+3. Copy the file given after `--in` to `workload_dir` as `gt2.json` (and the same for `gt1.json`). Keep the key
+   `dxgi_adapter_luid`; the tool rewrites it.
+4. Set `[3dmark] exe` to the test binary (`...\3DMark\dlc\time-spy-test\bin\x64\3DMarkTimeSpy.exe` for Time Spy).
+
+What the tool handles:
+
+| Problem | What happens | Handling |
+|---|---|---|
+| The DXGI adapter LUID changes on every boot | 3DMark refuses the launch: "No DXGI adapter with given luid found". It looks like a failed run | `tools/luid.ps1` lists the adapters; the LUID is written into the workload before each launch |
+| A hang takes minutes to notice | waiting for the process to end cost up to 150 s per hang | every 2 s one PowerShell call checks the process and the System log (event 4101, any nvlddmkm event) |
+| A launch that never ran | locked drive, stale LUID, sleeping display: no result and no reset | not counted; relaunched up to `trial.relaunch` times |
+| A driver reset drops the settings | the curve, the memory offset and the clock cap are gone after a reset | `--profile N --cap MHz` are re-applied before the trial and after every failure |
+| The GPU is already busy | a trial started on top of someone's benchmark | preflight refuses to start above 20 % load |
+
+```
+python -m bwoc tse --runs 8 --profile 1 --cap 3090            # gate: stops at the first hang
+python -m bwoc tse --runs 8 --profile 1 --rate --label p1     # measures the hang rate over all 8 runs
+python -m bwoc tse --tests gt1,gt2 --runs 4                   # both tests, back to back
+```
+
+A run passes when the process exits by itself, 3DMark wrote a result, and no driver reset was logged.
+
+Back-to-back direct launches are harsher than full 3DMark runs. On the 5090 the same setup hung 5 times in 8 direct
+GT2 runs while full app runs (with demo, loading and the CPU test between graphics tests) passed. Use the harness to
+compare settings with each other, not to predict how often a full run fails.
+
+## Displays must stay awake
+
+3DMark aborts with `window_focus_lost: Display resolution changed` if a display goes to sleep. For unattended trials
+run `tools/awake.ps1` (keeps the system and displays awake until `awake.stop` appears or `-Hours` pass). Dimming the
+screens over DDC is fine; sleep is not.
+
+## Telemetry at 100 ms (`tools/mahmlog.ps1`)
+
+nvidia-smi does not report core voltage and its 1 s sampling misses the event. `tools/mahmlog.ps1` reads
+Afterburner's shared memory every 100 ms and writes `time,clock,voltage,power,usage,temp`, flushing each line, so
+the log survives a hard hang up to the last sample.
+
+```
+powershell -ExecutionPolicy Bypass -File tools\mahmlog.ps1 -Out C:\bwoc\telemetry.csv
+```
+
+For the clock limit reasons (power cap, thermal, reliability voltage), log nvidia-smi alongside it:
+
+```
+nvidia-smi --query-gpu=timestamp,clocks.gr,power.draw,power.limit,temperature.gpu,clocks_event_reasons.active,clocks_event_reasons.sw_power_cap,clocks_event_reasons.hw_slowdown,clocks_event_reasons.sw_thermal_slowdown --format=csv -lms 1000 -f limits.csv
+```
+
+## The hang signature (`python -m bwoc hangscan`)
+
+Every Time Spy hang on the 5090 had the same shape in the 100 ms log:
+
+1. A heavy scene: 2,990 to 3,150 MHz at 985 to 1,050 mV, 410 to 600 W.
+2. Within one sample, power collapses to 120 to 155 W while usage stays at 98 to 100 %. The GPU has stopped mid-frame.
+3. Because power fell, the clock jumps to the top of the curve (3,120 to 3,270 MHz). This jump looks like a light-load
+   boost crash but it is a symptom: the GPU had already hung.
+4. A driver reset (event 4101, nvlddmkm event 14 "PF FLR") 2 to 15 s later, or a full Windows freeze.
+
+A normal scene change or loading screen drops usage together with power, so it does not match. The scanner flags a
+sample over `--heavy-w` (400 W) followed within `--window` (3 s) by at least `--min-low` (1 s) of samples under
+`--low-w` (200 W) at `--busy-pct` (95 %) usage or more:
+
+```
+python -m bwoc hangscan telemetry.csv > hangs.csv
+```
+
+On the 5090's log of 17 and 18 Nov it found every logged Time Spy hang. Its false positives were runs of the CUDA
+load-ramp test (`gpucheck/ramp.cu`), which holds the GPU at 100 % usage and 170 W on purpose. Check flagged times
+against what was running.
+
+## What did not reproduce the hang
+
+Each of these was run at a setting that hung Time Spy GT2, and passed:
+
+| Load | Result |
+|---|---|
+| FurMark 2 (Vulkan), steady, any window size | pass; FurMark also overstates the limits (see METHOD.md) |
+| FurMark load steps: light vsync FurMark plus heavy 2560x1440 FurMark every ~6 s | 40 load steps, no crash |
+| `gpucheck/ramp.cu`: light compute, stepped ramp to full, back | 23 cycles, 0 errors, no reset |
+| OCCT 3D Adaptive (Variable and Switch) | 19 + 10 min clean, but it only drove the card to 2,700 to 3,020 MHz, under the hang zone |
+| 3DMark Steel Nomad Stress Test, 20 loops | 99.2 % stability, no reset |
+
+So keep a real 3D workload that reaches the hang clocks in the test plan.
+
+## OCCT GUI automation, notes
+
+OCCT has no command line for its GPU tests, and it runs elevated, so posted window messages do not reach it. What
+worked:
+
+- The elevated helper's `pclick PROC X Y`: it brings the largest window of process PROC to the front and does a real
+  mouse click (SetCursorPos and mouse_event) at X,Y pixels from the window's top-left corner.
+- Coordinates depend on the OCCT version, window size and display scaling. Take a screenshot of the window, read the
+  positions of: Stability test, 3D Adaptive, the mode (Variable or Switch), the duration, and Start. Keep the window
+  size fixed between runs.
+- Watch the System log for driver resets while it runs (the same check as the Time Spy harness) and take a
+  screenshot at the end for OCCT's verdict.
+- Do not move the mouse or use the PC while the clicks run. Check the GPU is idle first.
+- OCCT's 3D Adaptive on the 5090 never went past about 3,020 MHz, so it could not test the clocks where Time Spy hung.
+
+## Practical gotchas
+
+- **BitLocker**: after some restarts the second drive (with the 3DMark library) stayed locked, so every launch
+  failed without running. The harness preflight checks the exe path; unlock the drive first.
+- **The DXGI LUID changes every boot** (above).
+- **`nvidia-smi -lgc F,F` does not hold F on Blackwell** under a heavy 3D load: the card ran about 100 MHz under a
+  min=max lock and temperature bins move it further. Use `-lgc 210,CAP` as a ceiling only.
+- **A driver reset clears the cap and offsets.** Re-apply after every failure (the harness does) and in normal use
+  (a logon task plus a task on event 4101, or a tray app that re-sends the cap every minute).
+- **`pkill -f PATTERN` can kill your own shell** when the pattern is also in that shell's command line. Match the
+  exact process name instead.
+- **Check that the GPU is idle** before starting any test; an unattended test once collided with a benchmark.

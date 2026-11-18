@@ -8,7 +8,10 @@ param(
     [Parameter(Mandatory = $true)][string]$ProfileFile,
     [int]$CapMin = 210,
     [int]$CapMax = 0,
-    [string]$NvidiaSmi = 'C:\Windows\System32\nvidia-smi.exe'
+    [string]$NvidiaSmi = 'C:\Windows\System32\nvidia-smi.exe',
+    # Optional, for the VBIOS commands of the helper (romsave, vixload, vixunload, vixverify, vixstatus).
+    [string]$NvFlash = '',
+    [string]$VixLoader = ''
 )
 $user = "$env:USERDOMAIN\$env:USERNAME"
 $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Highest
@@ -16,7 +19,8 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -ExecutionTime
 $logon = New-ScheduledTaskTrigger -AtLogOn -User $user
 
 $helper = Join-Path $PSScriptRoot 'helper.ps1'
-$act = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ("-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$helper`" -ProfileFile `"$ProfileFile`"")
+$act = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ("-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$helper`" -ProfileFile `"$ProfileFile`"" +
+    $(if ($NvFlash) { " -NvFlash `"$NvFlash`"" } else { '' }) + $(if ($VixLoader) { " -VixLoader `"$VixLoader`"" } else { '' }))
 Register-ScheduledTask -TaskName 'BWOC helper' -Action $act -Trigger $logon -Principal $principal -Settings $settings -Force | Out-Null
 Write-Output 'Registered: BWOC helper'
 

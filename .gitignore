@@ -9,3 +9,11 @@ gpucheck/*.lib
 tools/cmd.txt
 tools/ack.txt
 tools/ab-stage.cfg
+gpucheck/ramp
+gpucheck/ramp.exe
+tools/telemetry.csv
+tools/telemetry.stop
+tools/awake.stop
+tools/*.rom
+tools/*.rom.json
+*.rom

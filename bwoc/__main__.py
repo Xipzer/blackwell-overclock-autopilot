@@ -3,7 +3,7 @@ import argparse
 import sys
 import time
 
-from . import abcurve, telemetry
+from . import abcurve, hangscan, telemetry, tse
 from .config import Config
 from .elevated import Elevated
 from .sweep import Sweep
@@ -58,11 +58,29 @@ def main(argv=None):
 
     sub.add_parser("telemetry", help="one line of live readings")
 
+    t = sub.add_parser("tse", help="N direct 3DMark test runs (default: Time Spy Extreme GT2), hang detection in ~2 s")
+    t.add_argument("--runs", type=int, help="runs (default: trial.runs)")
+    t.add_argument("--tests", help="workload names, comma list (default: trial.tests)")
+    t.add_argument("--profile", type=int, help="apply this Afterburner slot first and after every failure")
+    t.add_argument("--cap", type=int, help="clock cap MHz (nvidia-smi -lgc MIN,CAP), set first and after every failure")
+    t.add_argument("--rate", action="store_true", help="do every run and report the hang rate (default: stop at the first hang)")
+    t.add_argument("--label", default="tse", help="name used in the journal")
+
+    h = sub.add_parser("hangscan", help="find the heavy-scene hang signature in a telemetry CSV")
+    h.add_argument("csv")
+    for k, v in hangscan.DEFAULTS.items():
+        h.add_argument("--" + k.replace("_", "-"), type=float, default=v)
+
     a = ap.parse_args(argv)
     cfg = Config(a.config)
     if a.cmd == "telemetry":
         print("nvidia-smi  clock/W/load/C:", telemetry.smi(cfg))
         print("Afterburner clock/mV/W/load:", telemetry.mahm(cfg))
+        return 0
+    if a.cmd == "hangscan":
+        ev = hangscan.scan(a.csv, a.heavy_w, a.low_w, a.busy_pct, a.window, a.min_low, a.gap)
+        print(hangscan.report(ev))
+        print("%d hang signature(s)" % len(ev), file=sys.stderr)
         return 0
     if a.cmd == "curve" and a.offset is None:
         lo, hi = ints(a.range)
@@ -80,6 +98,22 @@ def main(argv=None):
         if not top:
             sys.exit("give MAX or set cap.max_mhz")
         return 0 if el.lock(a.min or cfg.int("cap", "min_mhz"), top) else 1
+    if a.cmd == "tse":
+        log = journal(cfg)
+        ts = tse.TimeSpy(cfg, log)
+
+        def setup():
+            if a.profile:
+                el.apply(a.profile)
+                time.sleep(4)
+            if a.cap:
+                el.lock(cfg.int("cap", "min_mhz"), a.cap)
+                time.sleep(2)
+        tests = (a.tests or cfg.get("trial", "tests")).split(",")
+        r = tse.trial(ts, a.runs or cfg.int("trial", "runs"), tests, setup if (a.profile or a.cap) else None,
+                      not a.rate, cfg.int("trial", "relaunch"), cfg.int("trial", "cooldown"), a.label, log)
+        log("%s RESULT: %d hang(s) in %d run(s), %d clean test(s)" % (a.label, r["hangs"], r["runs"], r["passes"]))
+        return 1 if r["hangs"] else 0
     if a.cmd == "sweep":
         if not (a.yes or a.resume):
             print("This search pushes the GPU until it fails. Expect driver hangs and blue screens (0x133).\n"
