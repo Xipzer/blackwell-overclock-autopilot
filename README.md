@@ -36,6 +36,10 @@ Founders Edition (water-cooled).** Results are in
   3,090 = 6 clean, 1 hang in 7 (Profile 1, max); cap 3,075 = 6 of 6 (Profile 2); no fps cost (about 173 in GT2).
   Forcing Resizable BAR for 3DMark (+1.2 %) and XBAR +400 brought GT2 to 176.6 fps. See
   [docs/METHOD.md](docs/METHOD.md#the-soft-cap-what-finally-worked).
+- **Validated score (3DMark app, 18 Nov):** Time Spy Extreme 24,961 overall, graphics 29,265 (up from 28,223 on the
+  old hang-prone curve, +3.7 %, now stable), CPU 13,615. Rank 92 of about 3,270 results for i9-14900KS + RTX 5090,
+  on a daily profile with no hardware mods. See
+  [blackwell-field-notes Results](https://github.com/Xipzer/blackwell-field-notes#results).
 
 Not built yet: writing a per-point curve from the results and the isolated re-test are still done by hand, and the
 3D (FurMark) search is not in this repo yet. See [docs/METHOD.md](docs/METHOD.md).
