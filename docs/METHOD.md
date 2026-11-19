@@ -235,7 +235,9 @@ take the last clean step as the max profile and one step under it as the safe on
 Then, outside the curve: forcing Resizable BAR for the benchmark's driver profile (NVIDIA Profile Inspector,
 `rBAR - Enable` 0x000F00BA = 1) gave +1.2 % (173.3 to 175.4 fps), and the XBAR offset +400 another 0.5 %
 (176.6 fps; +500 reached the 0.9 x core ceiling with the same fps). Afterburner does not store the XBAR offset in a
-profile, so apply it with a logon task.
+profile, so apply it with a logon task, or natively without Afterburner: since 19 Nov we apply the finished profile
+and the XBAR offset through `nvapi64.dll` from a tray tool
+([blackout-tray docs/gpu.md](https://github.com/Xipzer/blackout-tray/blob/main/docs/gpu.md)).
 
 ## Afterburner details
 

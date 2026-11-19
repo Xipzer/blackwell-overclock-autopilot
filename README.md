@@ -51,6 +51,14 @@ Founders Edition (water-cooled).** Results are in
 - **Final config results (19 Nov, 3DMark app):** Time Spy Extreme 25,025 overall, graphics 29,380 (new best), Fire
   Strike Ultra 34,563 overall, graphics 37,465 (new best), Steel Nomad 16,523 (no gain), Steel Nomad Stress Test
   99.3 % clean. See [blackwell-field-notes Results](https://github.com/Xipzer/blackwell-field-notes#final-config-19-nov-measured).
+- **Daily use without Afterburner (19 Nov):** this tool still searches and tests through Afterburner, but the
+  finished profile no longer needs it. On driver 621.24 the curve, power limit, memory offset and XBAR offset were
+  all written natively through `nvapi64.dll` and read back, with no driver reset.
+  [blackout-tray](https://github.com/Xipzer/blackout-tray) now applies both profiles and XBAR +400 at startup and
+  after a driver reset (the reset path is not yet exercised by a real reset); Afterburner stays installed as the
+  fallback and for monitoring, but does not start with Windows. Private driver interfaces, tested on one card. See
+  [blackwell-field-notes, Without Afterburner](https://github.com/Xipzer/blackwell-field-notes#without-afterburner-19-nov)
+  and the layouts in [blackout-tray docs/gpu.md](https://github.com/Xipzer/blackout-tray/blob/main/docs/gpu.md).
 
 Not built yet: writing a per-point curve from the results and the isolated re-test are still done by hand, and the
 3D (FurMark) search is not in this repo yet. See [docs/METHOD.md](docs/METHOD.md).
@@ -79,7 +87,8 @@ this tool handles or depends on:
 | Per-band offsets can make the curve non-monotonic and pin hangs on the wrong band | `abcurve.monotonic()` caps each point at the lowest clock above it; `--softcap` output is monotonic |
 | With one GPU (iGPU off), Afterburner drops the `GPU1 ` prefix (core voltage = `GPU voltage`) | `mahmlog.ps1` and `mahm1.ps1` fall back to the plain names |
 | 3DMark Time Spy does not use Resizable BAR by default | you: NVIDIA Profile Inspector, "3DMark TimeSpy" profile, `rBAR - Enable` (0x000F00BA) = 1 (+1.2 % GT2 here) |
-| XBAR offset is not stored in a profile | you: a logon task running `MSIAfterburner.exe /wpXBARCLK_off,400` (or `abwp XBARCLK_off 400`) |
+| XBAR offset is not stored in a profile | you: a logon task running `MSIAfterburner.exe /wpXBARCLK_off,400` (or `abwp XBARCLK_off 400`), or apply it natively without Afterburner ([blackout-tray docs/gpu.md](https://github.com/Xipzer/blackout-tray/blob/main/docs/gpu.md)) |
+| A native memory offset write (SetPstates20) zeroes every curve offset (621.24) | you, if you apply settings without Afterburner: power limit, memory, XBAR, curve last, then read the curve back |
 
 ## How it works, short
 
@@ -180,7 +189,7 @@ curve, which the card only runs at light load.
 | [blackwell-overclock-autopilot](https://github.com/Xipzer/blackwell-overclock-autopilot) (this one) | NVIDIA RTX 50 edition |
 | [raptor-lake-field-notes](https://github.com/Xipzer/raptor-lake-field-notes) | Data and lessons from the Raptor Lake campaign |
 | [blackwell-field-notes](https://github.com/Xipzer/blackwell-field-notes) | Data and lessons from the RTX 5090 tuning |
-| [blackout-tray](https://github.com/Xipzer/blackout-tray) | Tray app for fans, RGB and screens, plus a GPU clock cap that follows the coolant temperature |
+| [blackout-tray](https://github.com/Xipzer/blackout-tray) | Tray app for fans, RGB and screens, plus a GPU clock cap that follows the coolant temperature and native GPU overclock profiles (no tuning app at startup) |
 
 ## Licence
 
