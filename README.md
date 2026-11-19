@@ -48,6 +48,9 @@ Founders Edition (water-cooled).** Results are in
   step (3,180 to 3,217 MHz at 1.065 to 1.08 V) and two driver resets followed; the 179.0 fps GT2 run is withdrawn.
   The soft cap now runs to 1,100 mV with a ramp to 3,440 MHz at 1,150 mV: GT2 3 of 3 clean (176.1 to 176.6 fps),
   validated Fire Strike Ultra 34,409 overall, graphics 37,457 (+1.3 %).
+- **Final config results (19 Nov, 3DMark app):** Time Spy Extreme 25,025 overall, graphics 29,380 (new best), Fire
+  Strike Ultra 34,563 overall, graphics 37,465 (new best), Steel Nomad 16,523 (no gain), Steel Nomad Stress Test
+  99.3 % clean. See [blackwell-field-notes Results](https://github.com/Xipzer/blackwell-field-notes#final-config-19-nov-measured).
 
 Not built yet: writing a per-point curve from the results and the isolated re-test are still done by hand, and the
 3D (FurMark) search is not in this repo yet. See [docs/METHOD.md](docs/METHOD.md).
