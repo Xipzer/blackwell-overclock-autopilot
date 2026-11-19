@@ -42,7 +42,7 @@ Verify the editor and loader downloads against the release SHA256SUMS. The loade
 | `nvvdd_rel_equation_max_mv` / `msvdd_rel_equation_max_mv` 1110 -> 1150 (and the linked `*_rel_max_mv`) | nothing measurable. The reliability (REL) voltage is computed per chip. Afterburner's extended report (helper `abreport`) shows NVVDD Vrel 1,120 mV and MSVDD Vrel 1,070 mV (with a -50 mV MSVDD offset) on this card; the highest load voltage we saw, 1.115 to 1.120 V, matches the NVVDD figure. An earlier version of this page said the core REL was about 1,070 mV, which mixed up the rails |
 | `msvdd_rel_equation_min_mv` 900 -> 1100 (the MSVDD REL floor) | Time Spy GT2 hang rate 4 in 9 runs (one of them a full Windows freeze) against 5 in 8 without it. Not a fix |
 | `runtime_voltage_offsets` 0 -> 1 | loads fine, but mVolt+ v0.50.13 NVVDD offsets (`--nvvdd-offsets 0,25,25`) were still ignored on driver 621.24: success reported, `rail_offsets_ignored_by_driver: true`, `nvvdd_max` stayed 1,120 mV |
-| `nvvdd_rel_equation_min_mv` 900 -> 1150 (the NVVDD REL floor; only field changed, 101 bytes) | **works.** After the restart mVolt+ `--status` reads `nvvdd_max` 1,170 mV (REL 1,150 plus the ALT +20 step), was 1,120. Under load the core tops out at about 1.135 V read (about 1.145 V set, the REL limit; ALT +20 unused). Only light loads get there: 4K Time Spy Extreme GT1 (about 540 W) stays at or under 1.02 V. With the curve top ramped from 3,247 MHz at 1,070 mV to +255 at 1,170 mV, a light 720p GT1 load runs 3,360 to 3,382 MHz instead of 3,172 to 3,195 (4 of 4 clean; +315 hung at 3,457 MHz) and GT2 went from 176.6 to 179.0 fps (1 run) |
+| `nvvdd_rel_equation_min_mv` 900 -> 1150 (the NVVDD REL floor; only field changed, 101 bytes) | **works.** After the restart mVolt+ `--status` reads `nvvdd_max` 1,170 mV (REL 1,150 plus the ALT +20 step), was 1,120. Under load the core tops out at about 1.135 V read (about 1.145 V set, the REL limit; ALT +20 unused). With the curve top ramped from 3,247 MHz at 1,070 mV to +255 at 1,170 mV, a light 720p GT1 load runs 3,360 to 3,382 MHz instead of 3,172 to 3,195 (4 of 4 clean; +315 hung at 3,457 MHz). **But heavy loads climb too**: Fire Strike Ultra ran 3,180 to 3,217 MHz at 1.065 to 1.08 V, on the old 1,065 to 1,070 mV step, and two driver resets followed; the 179.0 fps GT2 run from that curve is withdrawn. With the soft cap extended to 1,100 mV: GT2 176.6, 176.1, 176.2 fps clean, Fire Strike Ultra graphics 37,457 (+1.3 %) |
 
 Background, from the editor's documentation and changelog:
 
@@ -63,14 +63,32 @@ What worked on the 5090 FE (18 Nov 2026):
    diff lists only that field.
 3. Load it (`vixload`), restart, `vixverify`, and read the limit back (mVolt+ `--status`, `nvvdd_max_mv`; or watch
    the highest voltage under a light load). Do not trust a tool's "success" without reading it back.
-4. Ramp the top of the curve (here 3,247 MHz at 1,070 mV to 3,247 + D at 1,170 mV) and search D with a light load
-   that actually sits at the top of the curve (Time Spy Extreme GT1 at 720p, about 250 W). Heavy 4K loads never get
-   there. A 720p load is CPU bound, so compare clocks, not fps.
-5. Rollback: load the previous image again and restart.
+4. **Extend the soft cap first.** A higher voltage limit moves heavy loads up the curve too, so any clock step that
+   heavy loads could not reach before becomes reachable. Hold every point up to where heavy loads can now go at the
+   heavy-load wall (here 1,100 mV at 3,090 MHz), then ramp the top above it.
+5. Search the top with a light load that actually sits there (Time Spy Extreme GT1 at 720p, about 250 W). A 720p
+   load is CPU bound, so compare clocks, not fps. Then re-test heavy loads (GT2, Fire Strike Ultra) and log their
+   voltage: if they run above the cap's last point, extend the cap.
+6. Rollback: load the previous image again and restart.
 
-Our ladder: D = +60, +105, +150, +195, +255 clean (3,255 to 3,382 MHz read), +315 hung at 3,457 MHz / 1.145 V.
-Saved: Profile 1 top +255, Profile 2 top +195. Details:
-[blackwell-field-notes, Voltage lever](https://github.com/Xipzer/blackwell-field-notes#voltage-lever).
+Our ladder (18 Nov, cap only up to 1,060 mV, ramp from 3,247 MHz at 1,070 mV to 3,247 + D at 1,170 mV): D = +60,
++105, +150, +195, +255 clean (3,255 to 3,382 MHz read), +315 hung at 3,457 MHz / 1.145 V. Saved as Profile 1 +255,
+Profile 2 +195.
+
+What went wrong (19 Nov): 4K TSE GT1 had stayed at or under 1.02 V, so we assumed heavy loads would not use the new
+top. Fire Strike Ultra then ran heavy scenes at 3,180 to 3,217 MHz and 1.065 to 1.08 V, on the step from 3,090 to
+3,247 MHz at 1,065 to 1,070 mV. Two driver resets followed at about 610 to 620 W (last heavy samples 3,030 to
+3,052 MHz at 1.03 to 1.045 V, then the power collapse). The 179.0 fps GT2 result on that curve came from the same
+step and is withdrawn.
+
+Current shape (19 Nov): points up to 1,100 mV capped at 3,090 MHz (Profile 1) / 3,075 (Profile 2),
+straight ramp from 1,100 to 1,150 mV (3,090 -> 3,440 / 3,075 -> 3,380), flat above. TSE GT2 3 of 3 clean (176.6,
+176.1, 176.2 fps, max 1.085 V, heavy load held at the wall), light 720p clean at 1.135 V, validated Fire Strike Ultra
+34,409 overall / 37,457 graphics (+1.3 % over 36,975). Details:
+[blackwell-field-notes, Voltage lever](https://github.com/Xipzer/blackwell-field-notes#voltage-lever) and Q28.
+
+A driver reset wipes memory +3000 and the XBAR offset; re-apply both before trusting a score (Fire Strike Ultra
+graphics 33,184 with both lost, 36,538 without XBAR, 37,457 with both).
 - MSVDD feeds the fabric (XBAR and SYS clocks); XBAR runs at about 0.90 x the core clock. NVIDIA lowered the MSVDD
   REL by 50 mV from driver 572.60, which is why the MSVDD floor was worth a test.
 

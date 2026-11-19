@@ -43,8 +43,11 @@ Founders Edition (water-cooled).** Results are in
 - **Voltage lever (18 Nov, 20:00 UTC):** mVolt+ runtime voltage offsets are ignored on driver 621.24, but raising
   the NVVDD REL floor in the override image (`nvvdd_rel_equation_min_mv` 900 -> 1150) lifts the core voltage limit
   from 1,120 to 1,170 mV. With the curve top ramped to +255 at 1,170 mV, light loads run 3,360 to 3,382 MHz instead
-  of about 3,180; heavy loads never use it (at or under 1.02 V). GT2 179.0 fps in one run (was 176.6). See
-  [docs/VBIOS.md](docs/VBIOS.md#voltage-lever-raising-the-core-voltage-limit).
+  of about 3,180. See [docs/VBIOS.md](docs/VBIOS.md#voltage-lever-raising-the-core-voltage-limit).
+- **Correction (19 Nov):** heavy loads climb up the curve too. Fire Strike Ultra reached the old 1,065 to 1,070 mV
+  step (3,180 to 3,217 MHz at 1.065 to 1.08 V) and two driver resets followed; the 179.0 fps GT2 run is withdrawn.
+  The soft cap now runs to 1,100 mV with a ramp to 3,440 MHz at 1,150 mV: GT2 3 of 3 clean (176.1 to 176.6 fps),
+  validated Fire Strike Ultra 34,409 overall, graphics 37,457 (+1.3 %).
 
 Not built yet: writing a per-point curve from the results and the isolated re-test are still done by hand, and the
 3D (FurMark) search is not in this repo yet. See [docs/METHOD.md](docs/METHOD.md).
