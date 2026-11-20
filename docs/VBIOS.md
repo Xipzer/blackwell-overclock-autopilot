@@ -10,6 +10,10 @@ written. Unloading the override and restarting gives the stock VBIOS back.
 > pin if it all comes through the connector, above the 9.2 to 9.5 A per-pin rating; 600 W is already 88 % of a
 > 9.5 A rating (sources in the field notes). Check that the plug is fully seated, never bend the cable near the
 > plug, and watch connector temperature or per-pin current if you can. Use at your own risk.
+>
+> What our card reported on 20 Nov (its own readings, not a meter at the connector): heavy tests peaked at 620 to
+> 668 W with the raised curve top and stayed at or under 595 W with the top held flat at 3,090 MHz. See "What the
+> raised top costs" below.
 
 ## Steps
 
@@ -42,7 +46,7 @@ Verify the editor and loader downloads against the release SHA256SUMS. The loade
 | `nvvdd_rel_equation_max_mv` / `msvdd_rel_equation_max_mv` 1110 -> 1150 (and the linked `*_rel_max_mv`) | nothing measurable. The reliability (REL) voltage is computed per chip. Afterburner's extended report (helper `abreport`) shows NVVDD Vrel 1,120 mV and MSVDD Vrel 1,070 mV (with a -50 mV MSVDD offset) on this card; the highest load voltage we saw, 1.115 to 1.120 V, matches the NVVDD figure. An earlier version of this page said the core REL was about 1,070 mV, which mixed up the rails |
 | `msvdd_rel_equation_min_mv` 900 -> 1100 (the MSVDD REL floor) | Time Spy GT2 hang rate 4 in 9 runs (one of them a full Windows freeze) against 5 in 8 without it. Not a fix |
 | `runtime_voltage_offsets` 0 -> 1 | loads fine, but mVolt+ v0.50.13 NVVDD offsets (`--nvvdd-offsets 0,25,25`) were still ignored on driver 621.24: success reported, `rail_offsets_ignored_by_driver: true`, `nvvdd_max` stayed 1,120 mV |
-| `nvvdd_rel_equation_min_mv` 900 -> 1150 (the NVVDD REL floor; only field changed, 101 bytes) | **works.** After the restart mVolt+ `--status` reads `nvvdd_max` 1,170 mV (REL 1,150 plus the ALT +20 step), was 1,120. Under load the core tops out at about 1.135 V read (about 1.145 V set, the REL limit; ALT +20 unused). With the curve top ramped from 3,247 MHz at 1,070 mV to +255 at 1,170 mV, a light 720p GT1 load runs 3,360 to 3,382 MHz instead of 3,172 to 3,195 (4 of 4 clean; +315 hung at 3,457 MHz). **But heavy loads climb too**: Fire Strike Ultra ran 3,180 to 3,217 MHz at 1.065 to 1.08 V, on the old 1,065 to 1,070 mV step, and two driver resets followed; the 179.0 fps GT2 run from that curve is withdrawn. With the soft cap extended to 1,100 mV: GT2 176.6, 176.1, 176.2 fps clean, Fire Strike Ultra graphics 37,457 (+1.3 %) |
+| `nvvdd_rel_equation_min_mv` 900 -> 1150 (the NVVDD REL floor; only field changed, 101 bytes) | **works.** After the restart mVolt+ `--status` reads `nvvdd_max` 1,170 mV (REL 1,150 plus the ALT +20 step), was 1,120. Under load the core tops out at about 1.135 V read (about 1.145 V set, the REL limit; ALT +20 unused). With the curve top ramped from 3,247 MHz at 1,070 mV to +255 at 1,170 mV, a light 720p GT1 load runs 3,360 to 3,382 MHz instead of 3,172 to 3,195 (4 of 4 clean; +315 hung at 3,457 MHz). **But heavy loads climb too**: Fire Strike Ultra ran 3,180 to 3,217 MHz at 1.065 to 1.08 V, on the old 1,065 to 1,070 mV step, and two driver resets followed; the 179.0 fps GT2 run from that curve is withdrawn. With the soft cap extended to 1,100 mV: GT2 176.6, 176.1, 176.2 fps clean, Fire Strike Ultra graphics 37,457 (+1.3 %). Direct test of the ramp against a flat top on this image (20 Nov): 1.6 to 2.8 % more fps in heavy tests for 79 to 114 W more (see "What the raised top costs" below) |
 
 Background, from the editor's documentation and changelog:
 
@@ -70,6 +74,8 @@ What worked on the 5090 FE (18 Nov 2026):
    load is CPU bound, so compare clocks, not fps. Then re-test heavy loads (GT2, Fire Strike Ultra) and log their
    voltage: if they run above the cap's last point, extend the cap.
 6. Rollback: load the previous image again and restart.
+7. **Measure what the top costs.** Run the profile with the ramp against the same curve with a flat top, same
+   image, alternating run by run, and log fps and power for both (see below).
 
 Our ladder (18 Nov, cap only up to 1,060 mV, ramp from 3,247 MHz at 1,070 mV to 3,247 + D at 1,170 mV): D = +60,
 +105, +150, +195, +255 clean (3,255 to 3,382 MHz read), +315 hung at 3,457 MHz / 1.145 V. Saved as Profile 1 +255,
@@ -86,6 +92,28 @@ straight ramp from 1,100 to 1,150 mV (3,090 -> 3,440 / 3,075 -> 3,380), flat abo
 176.1, 176.2 fps, max 1.085 V, heavy load held at the wall), light 720p clean at 1.135 V, validated Fire Strike Ultra
 34,409 overall / 37,457 graphics (+1.3 % over 36,975). Details:
 [blackwell-field-notes, Voltage lever](https://github.com/Xipzer/blackwell-field-notes#voltage-lever) and Q28.
+
+### What the raised top costs (20 Nov)
+
+The field notes said on 19 Nov that this image costs about 45 W in heavy loads for no score. That was never tested
+directly: it compared Steel Nomad runs from different days with the image, the curve shape and ReBAR all changed.
+The direct test changed one thing, the top of the curve, on the same image (memory +3000, XBAR +400, ReBAR as set,
+700 W limit; 5 runs each, alternating run by run; water at or under 32.5 C at each start; profile applied and read
+back from the card before every run; borderless fullscreen 1080p on one monitor):
+
+| Test | Ramp to 3,440 MHz at 1,150 mV: fps (range), mean W / peak W | Flat top at 3,090 MHz: fps (range), mean W / peak W |
+|---|---|---|
+| Time Spy Extreme GT1 | 180.90 (180.35 to 181.45), 602 / 620 | 175.99 (175.44 to 176.46), 488 / 513 |
+| Time Spy Extreme GT2 | 176.85 (176.42 to 177.01), 633 / 663 | 172.45 (172.14 to 172.80), 524 / 582 |
+| Steel Nomad | 160.80 (160.34 to 161.08), 652 / 668 | 158.22 (157.63 to 158.73), 573 / 595 |
+| Light (GT1 at 720p) | 274.63, 324 W mean | 273.86, 211 W mean |
+
+No hangs in 40 runs. The ramp buys 1.6 to 2.8 % more fps in the heavy tests for 79 to 114 W more, and nothing
+measurable in the CPU-bound light test for 113 W more. With the ramp, heavy loads sat at 1.03 to 1.06 V and spent
+part of the time above the cap; with a flat top the card settled near 0.98 V. Power is the card's own reading
+(nvidia-smi), not a meter at the connector. Still untested: the image on its own (old image against this one on
+the same curve). Full method and data:
+[blackwell-field-notes, section 9](https://github.com/Xipzer/blackwell-field-notes#9-20-nov-the-raised-top-tested-directly).
 
 A driver reset wipes memory +3000 and the XBAR offset; re-apply both before trusting a score (Fire Strike Ultra
 graphics 33,184 with both lost, 36,538 without XBAR, 37,457 with both).

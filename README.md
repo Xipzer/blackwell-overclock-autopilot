@@ -49,16 +49,43 @@ Founders Edition (water-cooled).** Results are in
   The soft cap now runs to 1,100 mV with a ramp to 3,440 MHz at 1,150 mV: GT2 3 of 3 clean (176.1 to 176.6 fps),
   validated Fire Strike Ultra 34,409 overall, graphics 37,457 (+1.3 %).
 - **Final config results (19 Nov, 3DMark app):** Time Spy Extreme 25,025 overall, graphics 29,380 (new best), Fire
-  Strike Ultra 34,563 overall, graphics 37,465 (new best), Steel Nomad 16,523 (no gain), Steel Nomad Stress Test
+  Strike Ultra 34,563 overall, graphics 37,465 (new best), Steel Nomad 16,523, Steel Nomad Stress Test
   99.3 % clean. See [blackwell-field-notes Results](https://github.com/Xipzer/blackwell-field-notes#final-config-19-nov-measured).
+  (Corrected 20 Nov: this line called the Steel Nomad score "no gain". That compared runs from different days with
+  the image, the curve shape and ReBAR all changed; see the next point.)
+- **Correction and direct test (20 Nov):** the field notes had said the raised-voltage VBIOS image costs about 45 W
+  in heavy loads for no score. That was never tested directly. The direct test changed one thing, the top of the
+  curve, on the same image, alternating run by run, 5 runs each: "Maximum" (cap 3,090 MHz up to 1,100 mV, then a
+  ramp to 3,440 MHz at 1,150 mV) against "Efficient" (the same curve with the top held flat at 3,090 MHz).
+
+  | Test | Maximum: fps, mean W / peak W | Efficient: fps, mean W / peak W |
+  |---|---|---|
+  | Time Spy Extreme GT1 | 180.90, 602 / 620 | 175.99, 488 / 513 |
+  | Time Spy Extreme GT2 | 176.85, 633 / 663 | 172.45, 524 / 582 |
+  | Steel Nomad | 160.80, 652 / 668 | 158.22, 573 / 595 |
+  | Light (GT1 at 720p, CPU bound) | 274.63, 324 W mean | 273.86, 211 W mean |
+
+  The raised top buys 1.6 to 2.8 % more fps in the heavy tests for 79 to 114 W more (ranges do not overlap), and
+  nothing measurable in the light test. No hangs in 40 runs. Power is the card's own reading, not a meter at the
+  connector: the Founders Edition has one 12V-2x6 connector rated 600 W, Maximum peaked at 620 to 668 W and
+  Efficient stayed at or under 595 W in every heavy test. A sweep of the flat cap down to 2,400 MHz (2 runs per
+  test and step, screening only, no hangs in 42 runs) put the knee at 3,000 to 3,090 MHz and showed that the voltage the
+  card settles at does not follow the cap, so a lower cap is not an undervolt (2,500 MHz drew more than 2,600).
+  Method, tables and raw data:
+  [blackwell-field-notes, section 9](https://github.com/Xipzer/blackwell-field-notes#9-20-nov-the-raised-top-tested-directly).
+- **Not finished (20 Nov):** the tuning of that card still owes a video memory test at memory +3000, more
+  benchmarks, long game sessions, the 10 to 12 run final pass and the image-only comparison (old image against
+  new, same curve). "Efficient" has only the 20 runs above behind it.
 - **Daily use without Afterburner (19 Nov):** this tool still searches and tests through Afterburner, but the
-  finished profile no longer needs it. On driver 621.24 the curve, power limit, memory offset and XBAR offset were
+  saved profile no longer needs it. On driver 621.24 the curve, power limit, memory offset and XBAR offset were
   all written natively through `nvapi64.dll` and read back, with no driver reset.
-  [blackout-tray](https://github.com/Xipzer/blackout-tray) now applies both profiles and XBAR +400 at startup and
-  after a driver reset (the reset path is not yet exercised by a real reset); Afterburner stays installed as the
+  A tray tool applies the profiles and XBAR +400 at startup and after a driver reset (the reset path is not yet
+  exercised by a real reset): blackout-tray on 19 Nov, and since that evening
+  [Central Command](https://github.com/Xipzer/central-command), the full-feature app split out of it (blackout-tray
+  is being cut back to screens, RGB and wake rules). Afterburner stays installed as the
   fallback and for monitoring, but does not start with Windows. Private driver interfaces, tested on one card. See
   [blackwell-field-notes, Without Afterburner](https://github.com/Xipzer/blackwell-field-notes#without-afterburner-19-nov)
-  and the layouts in [blackout-tray docs/gpu.md](https://github.com/Xipzer/blackout-tray/blob/main/docs/gpu.md).
+  and the layouts in [Central Command docs/gpu.md](https://github.com/Xipzer/central-command/blob/main/docs/gpu.md).
 
 Not built yet: writing a per-point curve from the results and the isolated re-test are still done by hand, and the
 3D (FurMark) search is not in this repo yet. See [docs/METHOD.md](docs/METHOD.md).
@@ -87,8 +114,10 @@ this tool handles or depends on:
 | Per-band offsets can make the curve non-monotonic and pin hangs on the wrong band | `abcurve.monotonic()` caps each point at the lowest clock above it; `--softcap` output is monotonic |
 | With one GPU (iGPU off), Afterburner drops the `GPU1 ` prefix (core voltage = `GPU voltage`) | `mahmlog.ps1` and `mahm1.ps1` fall back to the plain names |
 | 3DMark Time Spy does not use Resizable BAR by default | you: NVIDIA Profile Inspector, "3DMark TimeSpy" profile, `rBAR - Enable` (0x000F00BA) = 1 (+1.2 % GT2 here) |
-| XBAR offset is not stored in a profile | you: a logon task running `MSIAfterburner.exe /wpXBARCLK_off,400` (or `abwp XBARCLK_off 400`), or apply it natively without Afterburner ([blackout-tray docs/gpu.md](https://github.com/Xipzer/blackout-tray/blob/main/docs/gpu.md)) |
+| XBAR offset is not stored in a profile | you: a logon task running `MSIAfterburner.exe /wpXBARCLK_off,400` (or `abwp XBARCLK_off 400`), or apply it natively without Afterburner ([Central Command docs/gpu.md](https://github.com/Xipzer/central-command/blob/main/docs/gpu.md)) |
 | A native memory offset write (SetPstates20) zeroes every curve offset (621.24) | you, if you apply settings without Afterburner: power limit, memory, XBAR, curve last, then read the curve back |
+| Steel Nomad cannot be launched directly in exclusive fullscreen and has no borderless option; window mode spans two monitors | not handled by `tse`. You: restyle the window borderless onto one monitor right after launch and check its rectangle; fps then differ from the app, so compare only inside the harness (field notes Q30) |
+| On a flat cap the voltage the card settles at does not follow the cap, so a lower `--softcap` is not an undervolt | you: log power and voltage at every step and choose by the measurement (field notes Q31) |
 
 ## How it works, short
 
@@ -179,6 +208,9 @@ curve, which the card only runs at light load.
 - If hangs land on the same clock whatever the voltage, stop adding margin per voltage: it is a clock wall. Find
   it with a soft cap ladder (15 MHz steps, 3 runs each) and keep the top of the curve.
 - Check the GPU is idle and the displays will stay awake before an unattended run.
+- To compare two settings, change one thing, alternate them run by run in one session, read the setting back from
+  the card before every run, and log watts next to fps. A comparison across days with several things changed
+  gave us a wrong conclusion that the direct test overturned (20 Nov).
 
 ## The suite
 
@@ -189,7 +221,8 @@ curve, which the card only runs at light load.
 | [blackwell-overclock-autopilot](https://github.com/Xipzer/blackwell-overclock-autopilot) (this one) | NVIDIA RTX 50 edition |
 | [raptor-lake-field-notes](https://github.com/Xipzer/raptor-lake-field-notes) | Data and lessons from the Raptor Lake campaign |
 | [blackwell-field-notes](https://github.com/Xipzer/blackwell-field-notes) | Data and lessons from the RTX 5090 tuning |
-| [blackout-tray](https://github.com/Xipzer/blackout-tray) | Tray app for fans, RGB and screens, plus a GPU clock cap that follows the coolant temperature and native GPU overclock profiles (no tuning app at startup) |
+| [central-command](https://github.com/Xipzer/central-command) | Tray app for fans, RGB and screens, plus a GPU clock cap that follows the coolant temperature and native GPU overclock profiles (no tuning app at startup) |
+| [blackout-tray](https://github.com/Xipzer/blackout-tray) | The tray app Central Command was split out of; being cut back to screens, RGB and wake rules |
 
 ## Licence
 

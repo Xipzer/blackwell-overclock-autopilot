@@ -70,6 +70,16 @@ A second display adapter matters too: with one monitor on the Intel iGPU, the fa
 monitor on the NVIDIA card and disable the iGPU in Windows and the BIOS before measuring. Details, sources and a
 clean measurement checklist: [blackwell-field-notes QUIRKS.md](https://github.com/Xipzer/blackwell-field-notes/blob/main/QUIRKS.md).
 
+## Steel Nomad direct launches (20 Nov)
+
+`tse` does not handle Steel Nomad. It can be started directly the same way
+(`3DMarkSteelNomad.exe --in <workload.json> --out <result.json>`), but exclusive fullscreen fails on a direct
+launch and the workload has no borderless option. Window mode opens a 3840x2160 window that spans two monitors,
+which is not a valid test state. What we did: start it in window mode, then restyle the window borderless (style
+`0x94000000`) onto one 1920x1080 monitor right after launch, read the rectangle back and reject the run if it is
+not exactly that monitor. Absolute fps then differ slightly from the 3DMark app (about 160.8 against 165 on the
+same profile), so only comparisons inside the same harness are valid. Details: field notes Q30.
+
 ## Displays must stay awake
 
 3DMark aborts with `window_focus_lost: Display resolution changed` if a display goes to sleep. For unattended trials

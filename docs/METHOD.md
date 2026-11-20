@@ -235,9 +235,9 @@ take the last clean step as the max profile and one step under it as the safe on
 Then, outside the curve: forcing Resizable BAR for the benchmark's driver profile (NVIDIA Profile Inspector,
 `rBAR - Enable` 0x000F00BA = 1) gave +1.2 % (173.3 to 175.4 fps), and the XBAR offset +400 another 0.5 %
 (176.6 fps; +500 reached the 0.9 x core ceiling with the same fps). Afterburner does not store the XBAR offset in a
-profile, so apply it with a logon task, or natively without Afterburner: since 19 Nov we apply the finished profile
+profile, so apply it with a logon task, or natively without Afterburner: since 19 Nov we apply the saved profile
 and the XBAR offset through `nvapi64.dll` from a tray tool
-([blackout-tray docs/gpu.md](https://github.com/Xipzer/blackout-tray/blob/main/docs/gpu.md)).
+([Central Command docs/gpu.md](https://github.com/Xipzer/central-command/blob/main/docs/gpu.md)).
 
 ## Afterburner details
 
@@ -295,6 +295,10 @@ runs elevated). `bwoc/elevated.py` puts them behind one interface:
 14. Hangs that land on the same clock at rising voltage are a clock wall. Margin per voltage will not fix it; a
     soft cap in the curve did, at no fps cost.
 15. Keep edited curves monotonic, or the driver will not follow the bands and hangs get blamed on the wrong one.
+16. A claim about cause needs its own test: one variable, alternating run by run in one session, the setting read
+    back before every run, power logged next to fps. We skipped that once and printed a wrong conclusion (below).
+17. A lower clock cap is not an undervolt. On a flat cap the driver picks the voltage, and it did not follow the
+    cap (20 Nov sweep: 2,500 MHz drew more than 2,600).
 
 ## What we got wrong
 
@@ -310,3 +314,7 @@ runs elevated). `bwoc/elevated.py` puts them behind one interface:
 - **"Memory +3000 might be the cause."** Memory at +0 also hung (windowed, run 2, a hard freeze seen in the
   telemetry log; the PC froze before the harness could record it), so it is not the sole cause.
 - **"Our logs are 100 ms."** Afterburner polled at 1 s until 18 Nov, so the logs repeated each value ten times.
+- **"The raised-voltage image costs about 45 W in heavy loads for no score."** Never tested directly: it compared
+  runs from different days with the image, the curve shape and ReBAR all changed. The direct test (20 Nov, the curve
+  top as the one variable, same image, 5 runs each, alternating) found the raised top buys 1.6 to 2.8 % more fps in
+  heavy tests for 79 to 114 W more. See [VBIOS.md](VBIOS.md).
